@@ -20,7 +20,6 @@ const configSchema = z.object({
 
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
 
-  OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required'),
   ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required'),
   CLAUDE_MODEL: z.string().default('claude-sonnet-4-6'),
   SOAP_PROMPT_VERSION: z.string().default('v1.0.0'),

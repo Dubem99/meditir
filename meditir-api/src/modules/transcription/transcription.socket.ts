@@ -1,34 +1,25 @@
 import { Server, Socket } from 'socket.io';
 import { verifyAccessToken } from '../../utils/jwt';
 import { prisma } from '../../config/database';
-import { transcribeAudioBuffer } from './transcription.service';
-import { Dialect, SessionStatus } from '../../types/enums';
+import { Dialect, SessionStatus, SyncStatus } from '../../types/enums';
 import { logger } from '../../utils/logger';
 
-interface AudioChunkPayload {
+interface TextSegmentPayload {
   sessionId: string;
-  chunk: ArrayBuffer;
+  text: string;
   dialect: Dialect;
   speakerTag?: string;
   startMs?: number;
 }
 
-// Per-session chunk buffer: accumulate ~3s of audio before sending to Whisper
-const sessionBuffers = new Map<
-  string,
-  { chunks: Buffer[]; timeout: ReturnType<typeof setTimeout> | null; startMs: number }
->();
-
-const BUFFER_FLUSH_MS = 3000;
-
 export const registerTranscriptionHandlers = (io: Server, socket: Socket): void => {
   /**
-   * Client joins the consultation room.
-   * The roomToken is stored on the session and serves as the Socket.io room ID.
+   * Client joins a consultation room using the session's roomToken.
    */
   socket.on('join:session', async (data: { roomToken: string; accessToken: string }) => {
     try {
       const payload = verifyAccessToken(data.accessToken);
+
       const session = await prisma.consultationSession.findFirst({
         where: { roomToken: data.roomToken, status: SessionStatus.IN_PROGRESS },
       });
@@ -38,8 +29,8 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
         return;
       }
 
-      // Authorize: only doctor and patient of this session can join
-      const isAuthorized = await (async () => {
+      // Authorize: doctor or patient of this session, or admin
+      const authorized = await (async () => {
         if (payload.role === 'HOSPITAL_ADMIN' || payload.role === 'SUPER_ADMIN') return true;
         if (payload.role === 'DOCTOR') {
           const doctor = await prisma.doctor.findFirst({
@@ -56,7 +47,7 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
         return false;
       })();
 
-      if (!isAuthorized) {
+      if (!authorized) {
         socket.emit('error', { message: 'Not authorized to join this session' });
         return;
       }
@@ -65,65 +56,52 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
       socket.emit('joined:session', { sessionId: session.id, roomToken: data.roomToken });
       logger.debug('Socket joined session room', { roomToken: data.roomToken, userId: payload.userId });
     } catch {
-      socket.emit('error', { message: 'Invalid token' });
+      socket.emit('error', { message: 'Invalid or expired token' });
     }
   });
 
   /**
-   * Receive raw audio chunk from doctor's browser.
-   * Buffer chunks for BUFFER_FLUSH_MS then send to Whisper.
+   * Receive a finalized text segment from the browser's Web Speech API.
+   * Persists to DB and broadcasts to all room participants.
    */
-  socket.on('transcription:audio_chunk', async (data: AudioChunkPayload) => {
-    const { sessionId, chunk, dialect, speakerTag, startMs } = data;
+  socket.on('transcription:text_segment', async (data: TextSegmentPayload) => {
+    const { sessionId, text, dialect, speakerTag, startMs } = data;
 
-    if (!sessionBuffers.has(sessionId)) {
-      sessionBuffers.set(sessionId, { chunks: [], timeout: null, startMs: startMs || 0 });
-    }
+    if (!text?.trim()) return;
 
-    const buffer = sessionBuffers.get(sessionId)!;
-    buffer.chunks.push(Buffer.from(chunk));
+    try {
+      const session = await prisma.consultationSession.findUnique({
+        where: { id: sessionId },
+        select: { id: true, roomToken: true, status: true },
+      });
 
-    // Clear existing debounce timer and reset
-    if (buffer.timeout) clearTimeout(buffer.timeout);
+      if (!session || session.status !== SessionStatus.IN_PROGRESS) return;
 
-    buffer.timeout = setTimeout(async () => {
-      const accumulated = Buffer.concat(buffer.chunks);
-      buffer.chunks = [];
-      buffer.timeout = null;
-
-      if (accumulated.length < 1000) return; // Skip tiny buffers (silence)
-
-      try {
-        const transcription = await transcribeAudioBuffer(
+      const transcription = await prisma.transcription.create({
+        data: {
           sessionId,
-          accumulated,
-          'audio/webm',
-          dialect,
-          speakerTag,
-          startMs
-        );
+          text: text.trim(),
+          dialect: dialect ?? Dialect.NIGERIAN_ENGLISH,
+          speakerTag: speakerTag ?? 'DOCTOR',
+          startMs: startMs ?? null,
+          syncStatus: SyncStatus.SYNCED,
+        },
+      });
 
-        if (transcription) {
-          // Broadcast to all room participants
-          const session = await prisma.consultationSession.findUnique({
-            where: { id: sessionId },
-            select: { roomToken: true },
-          });
-          if (session?.roomToken) {
-            io.to(session.roomToken).emit('transcription:new_segment', {
-              id: transcription.id,
-              text: transcription.text,
-              speakerTag: transcription.speakerTag,
-              startMs: transcription.startMs,
-              createdAt: transcription.createdAt,
-            });
-          }
-        }
-      } catch (err) {
-        logger.error('Real-time transcription error', { error: err, sessionId });
-        socket.emit('transcription:error', { message: 'Transcription failed for this chunk' });
+      // Broadcast to everyone in the room (doctor + any listening patients)
+      if (session.roomToken) {
+        io.to(session.roomToken).emit('transcription:new_segment', {
+          id: transcription.id,
+          text: transcription.text,
+          speakerTag: transcription.speakerTag,
+          startMs: transcription.startMs,
+          createdAt: transcription.createdAt,
+        });
       }
-    }, BUFFER_FLUSH_MS);
+    } catch (err) {
+      logger.error('Failed to save text segment', { error: err, sessionId });
+      socket.emit('transcription:error', { message: 'Failed to save transcription' });
+    }
   });
 
   socket.on('leave:session', (roomToken: string) => {

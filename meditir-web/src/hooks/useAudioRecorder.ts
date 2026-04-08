@@ -1,62 +1,99 @@
 'use client';
 
 import { useRef, useState, useCallback } from 'react';
+import type { Dialect } from '@/types/entities.types';
+
+export interface TranscriptSegment {
+  text: string;
+  isFinal: boolean;
+}
 
 export interface UseAudioRecorderReturn {
   isRecording: boolean;
-  startRecording: (onChunk: (chunk: ArrayBuffer) => void) => Promise<void>;
+  startRecording: (onSegment: (segment: TranscriptSegment) => void) => void;
   stopRecording: () => void;
   error: string | null;
+  isSupported: boolean;
 }
 
-const TIMESLICE_MS = 3000; // Emit chunk every 3 seconds
+const dialectToLang: Record<Dialect, string> = {
+  NIGERIAN_ENGLISH: 'en-NG',
+  YORUBA_ACCENTED: 'yo',
+  HAUSA_ACCENTED: 'ha',
+  IGBO_ACCENTED: 'ig',
+};
 
-export const useAudioRecorder = (): UseAudioRecorderReturn => {
+// Use any for the Web Speech API since TypeScript lib types vary by version
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnySpeechRecognition = any;
+
+export const useAudioRecorder = (dialect: Dialect = 'NIGERIAN_ENGLISH'): UseAudioRecorderReturn => {
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<AnySpeechRecognition>(null);
 
-  const startRecording = useCallback(async (onChunk: (chunk: ArrayBuffer) => void) => {
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+  const isSupported =
+    typeof window !== 'undefined' &&
+    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm';
+  const startRecording = useCallback(
+    (onSegment: (segment: TranscriptSegment) => void) => {
+      if (!isSupported) {
+        setError('Speech recognition is not supported in this browser. Use Chrome or Edge.');
+        return;
+      }
 
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
+      setError(null);
 
-      recorder.ondataavailable = async (event) => {
-        if (event.data.size > 0) {
-          const buffer = await event.data.arrayBuffer();
-          onChunk(buffer);
+      const win = window as typeof window & {
+        webkitSpeechRecognition?: AnySpeechRecognition;
+        SpeechRecognition?: AnySpeechRecognition;
+      };
+
+      const SpeechRecognitionImpl = win.webkitSpeechRecognition ?? win.SpeechRecognition;
+      const recognition: AnySpeechRecognition = new SpeechRecognitionImpl();
+      recognitionRef.current = recognition;
+
+      recognition.lang = dialectToLang[dialect] ?? 'en-NG';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event: AnySpeechRecognition) => {
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          onSegment({
+            text: result[0].transcript.trim(),
+            isFinal: result.isFinal,
+          });
         }
       };
 
-      recorder.onerror = () => {
-        setError('Recording error occurred');
-        setIsRecording(false);
+      recognition.onerror = (event: AnySpeechRecognition) => {
+        if (event.error !== 'no-speech') {
+          setError(`Recognition error: ${event.error}`);
+          setIsRecording(false);
+        }
       };
 
-      recorder.start(TIMESLICE_MS);
+      recognition.onend = () => {
+        // Auto-restart if still recording
+        if (recognitionRef.current) {
+          try { recognition.start(); } catch {}
+        }
+      };
+
+      recognition.start();
       setIsRecording(true);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Microphone access denied';
-      setError(message);
-    }
-  }, []);
+    },
+    [dialect, isSupported]
+  );
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state !== 'inactive') {
-      mediaRecorderRef.current?.stop();
-    }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
     setIsRecording(false);
   }, []);
 
-  return { isRecording, startRecording, stopRecording, error };
+  return { isRecording, startRecording, stopRecording, error, isSupported };
 };

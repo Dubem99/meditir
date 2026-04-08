@@ -26,11 +26,10 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
   const transcriptions = useSessionStore((s) => s.transcriptions);
   const { isOnline } = useOfflineSync(session.id);
 
-  const { isRecording, startTranscription, stopTranscription, error } = useTranscription(
+  const { isRecording, startTranscription, stopTranscription, error, isSupported } = useTranscription(
     session.id,
     session.roomToken!,
-    dialect,
-    session.startedAt ? Date.now() - new Date(session.startedAt).getTime() : 0
+    dialect
   );
 
   const handleEndSession = async () => {
@@ -117,6 +116,11 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
               </div>
             )}
 
+            {!isSupported && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
+                Use <strong>Chrome</strong> or <strong>Edge</strong> for live transcription.
+              </p>
+            )}
             {error && (
               <p className="text-sm text-red-600 text-center">{error}</p>
             )}

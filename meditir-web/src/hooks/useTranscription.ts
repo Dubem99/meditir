@@ -1,75 +1,79 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useAudioRecorder } from './useAudioRecorder';
 import { useOfflineStore } from '@/store/offline.store';
 import { useSessionStore } from '@/store/session.store';
-import { connectSocket, getSocket, sendAudioChunk, joinSession, leaveSession } from '@/lib/socket';
-import { storeOfflineChunk } from '@/lib/indexedDB';
+import { connectSocket, getSocket, joinSession, leaveSession } from '@/lib/socket';
+import { storeOfflineTranscription } from '@/lib/indexedDB';
 import type { Dialect, Transcription } from '@/types/entities.types';
 
 export const useTranscription = (
   sessionId: string,
   roomToken: string,
-  dialect: Dialect,
-  sessionStartMs: number = 0
+  dialect: Dialect
 ) => {
   const { isOnline } = useOfflineStore();
   const { addTranscription, setRecording } = useSessionStore();
-  const recorder = useAudioRecorder();
-  let chunkIndex = 0;
+  const recorder = useAudioRecorder(dialect);
+  const startMsRef = useRef(Date.now());
+  const interimRef = useRef<string>('');
 
   // Connect socket and join room on mount
   useEffect(() => {
     const socket = connectSocket();
     joinSession(roomToken);
 
-    socket.on('joined:session', () => {
-      console.log('Joined session room', roomToken);
-    });
-
     socket.on('transcription:new_segment', (segment: Transcription) => {
       addTranscription(segment);
-    });
-
-    socket.on('transcription:error', (err: { message: string }) => {
-      console.error('Transcription error:', err.message);
     });
 
     return () => {
       leaveSession(roomToken);
       socket.off('transcription:new_segment');
-      socket.off('transcription:error');
-      socket.off('joined:session');
     };
-  }, [roomToken]);
+  }, [roomToken, addTranscription]);
 
-  const handleChunk = useCallback(
-    async (chunk: ArrayBuffer) => {
-      const startMs = sessionStartMs + chunkIndex * 3000;
-      chunkIndex++;
+  const handleSegment = useCallback(
+    ({ text, isFinal }: { text: string; isFinal: boolean }) => {
+      if (!isFinal) {
+        interimRef.current = text;
+        return;
+      }
+
+      // Only send final segments
+      interimRef.current = '';
+      const startMs = Date.now() - startMsRef.current;
 
       if (isOnline) {
-        sendAudioChunk({ sessionId, chunk, dialect, speakerTag: 'DOCTOR', startMs });
-      } else {
-        // Store offline for later sync
-        await storeOfflineChunk({
+        // Send text (not audio) to server via socket
+        getSocket().emit('transcription:text_segment', {
           sessionId,
-          blob: new Blob([chunk], { type: 'audio/webm' }),
+          text,
+          speakerTag: 'DOCTOR',
+          startMs,
+          dialect,
+        });
+      } else {
+        storeOfflineTranscription({
+          sessionId,
+          text,
           dialect,
           speakerTag: 'DOCTOR',
           startMs,
           createdAt: Date.now(),
+          synced: false,
         });
       }
     },
-    [sessionId, dialect, isOnline, sessionStartMs]
+    [sessionId, dialect, isOnline]
   );
 
-  const startTranscription = useCallback(async () => {
-    await recorder.startRecording(handleChunk);
+  const startTranscription = useCallback(() => {
+    startMsRef.current = Date.now();
+    recorder.startRecording(handleSegment);
     setRecording(true);
-  }, [recorder, handleChunk, setRecording]);
+  }, [recorder, handleSegment, setRecording]);
 
   const stopTranscription = useCallback(() => {
     recorder.stopRecording();
@@ -81,6 +85,7 @@ export const useTranscription = (
     startTranscription,
     stopTranscription,
     error: recorder.error,
+    isSupported: recorder.isSupported,
     isOnline,
   };
 };

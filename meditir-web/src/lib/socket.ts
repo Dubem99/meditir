@@ -40,12 +40,12 @@ export const leaveSession = (roomToken: string) => {
   getSocket().emit('leave:session', roomToken);
 };
 
-export const sendAudioChunk = (payload: {
+export const sendTextSegment = (payload: {
   sessionId: string;
-  chunk: ArrayBuffer;
+  text: string;
   dialect: string;
   speakerTag?: string;
   startMs?: number;
 }) => {
-  getSocket().emit('transcription:audio_chunk', payload);
+  getSocket().emit('transcription:text_segment', payload);
 };
