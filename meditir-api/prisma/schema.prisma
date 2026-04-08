@@ -1,0 +1,358 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  HOSPITAL_ADMIN
+  DOCTOR
+  PATIENT
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum SessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum NoteStatus {
+  DRAFT
+  AI_GENERATED
+  DOCTOR_REVIEWED
+  FINALIZED
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+enum Dialect {
+  NIGERIAN_ENGLISH
+  YORUBA_ACCENTED
+  HAUSA_ACCENTED
+  IGBO_ACCENTED
+}
+
+// ─────────────────────────────────────────────
+// MULTI-TENANT CORE
+// ─────────────────────────────────────────────
+
+model Hospital {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  logoUrl   String?
+  address   String?
+  phone     String?
+  email     String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users    User[]
+  doctors  Doctor[]
+  patients Patient[]
+  sessions ConsultationSession[]
+  soapNotes SOAPNote[]
+
+  @@map("hospitals")
+}
+
+// ─────────────────────────────────────────────
+// AUTH / IDENTITY
+// ─────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  role         Role
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  hospitalId String?
+  hospital   Hospital? @relation(fields: [hospitalId], references: [id])
+
+  refreshTokens RefreshToken[]
+  doctor        Doctor?
+  patient       Patient?
+  adminProfile  AdminProfile?
+
+  @@index([email])
+  @@index([hospitalId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────
+// ADMIN PROFILE
+// ─────────────────────────────────────────────
+
+model AdminProfile {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id])
+  firstName  String
+  lastName   String
+  avatarUrl  String?
+  phone      String?
+  department String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("admin_profiles")
+}
+
+// ─────────────────────────────────────────────
+// DOCTOR
+// ─────────────────────────────────────────────
+
+model Doctor {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id])
+  hospitalId       String
+  hospital         Hospital @relation(fields: [hospitalId], references: [id])
+
+  firstName        String
+  lastName         String
+  specialization   String
+  licenseNumber    String  @unique
+  gender           Gender?
+  avatarUrl        String?
+  phone            String?
+  bio              String?
+
+  preferredDialect Dialect @default(NIGERIAN_ENGLISH)
+  isAvailable      Boolean @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  schedules DoctorSchedule[]
+  sessions  ConsultationSession[]
+
+  @@index([hospitalId])
+  @@map("doctors")
+}
+
+model DoctorSchedule {
+  id        String   @id @default(uuid())
+  doctorId  String
+  doctor    Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([doctorId, dayOfWeek])
+  @@map("doctor_schedules")
+}
+
+// ─────────────────────────────────────────────
+// PATIENT
+// ─────────────────────────────────────────────
+
+model Patient {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id])
+  hospitalId        String
+  hospital          Hospital  @relation(fields: [hospitalId], references: [id])
+
+  firstName         String
+  lastName          String
+  dateOfBirth       DateTime?
+  gender            Gender?
+  bloodGroup        String?
+  genotype          String?
+  phone             String?
+  address           String?
+  nextOfKin         String?
+  nextOfKinPhone    String?
+  avatarUrl         String?
+
+  medicalRecordNo   String?   @unique
+  allergies         String[]
+  chronicConditions String[]
+
+  preferTTS         Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  sessions  ConsultationSession[]
+  soapNotes SOAPNote[]
+
+  @@index([hospitalId])
+  @@index([medicalRecordNo])
+  @@map("patients")
+}
+
+// ─────────────────────────────────────────────
+// CONSULTATION SESSION
+// ─────────────────────────────────────────────
+
+model ConsultationSession {
+  id         String        @id @default(uuid())
+  hospitalId String
+  hospital   Hospital      @relation(fields: [hospitalId], references: [id])
+  doctorId   String
+  doctor     Doctor        @relation(fields: [doctorId], references: [id])
+  patientId  String
+  patient    Patient       @relation(fields: [patientId], references: [id])
+
+  status      SessionStatus @default(SCHEDULED)
+  scheduledAt DateTime
+  startedAt   DateTime?
+  endedAt     DateTime?
+  dialect     Dialect       @default(NIGERIAN_ENGLISH)
+
+  roomToken String? @unique
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transcriptions Transcription[]
+  soapNote       SOAPNote?
+
+  @@index([hospitalId])
+  @@index([doctorId])
+  @@index([patientId])
+  @@index([status])
+  @@map("consultation_sessions")
+}
+
+// ─────────────────────────────────────────────
+// TRANSCRIPTION
+// ─────────────────────────────────────────────
+
+model Transcription {
+  id        String              @id @default(uuid())
+  sessionId String
+  session   ConsultationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  text       String
+  confidence Float?
+  speakerTag String?
+  startMs    Int?
+  endMs      Int?
+  dialect    Dialect
+
+  syncStatus SyncStatus @default(SYNCED)
+  createdAt  DateTime   @default(now())
+
+  @@index([sessionId])
+  @@map("transcriptions")
+}
+
+// ─────────────────────────────────────────────
+// SOAP NOTE
+// ─────────────────────────────────────────────
+
+model SOAPNote {
+  id         String              @id @default(uuid())
+  sessionId  String              @unique
+  session    ConsultationSession @relation(fields: [sessionId], references: [id])
+  hospitalId String
+  hospital   Hospital            @relation(fields: [hospitalId], references: [id])
+  patientId  String
+  patient    Patient             @relation(fields: [patientId], references: [id])
+
+  subjective String
+  objective  String
+  assessment String
+  plan       String
+
+  status        NoteStatus @default(AI_GENERATED)
+  aiModel       String?    @default("claude-sonnet-4-6")
+  promptVersion String?
+
+  ttsAudioUrl    String?
+  ttsGeneratedAt DateTime?
+
+  doctorSignedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([hospitalId])
+  @@index([patientId])
+  @@map("soap_notes")
+}
+
+// ─────────────────────────────────────────────
+// OFFLINE SYNC QUEUE
+// ─────────────────────────────────────────────
+
+model OfflineSyncQueue {
+  id         String     @id @default(uuid())
+  userId     String
+  hospitalId String
+  entityType String
+  payload    Json
+  syncStatus SyncStatus @default(PENDING)
+  attempts   Int        @default(0)
+  lastError  String?
+  createdAt  DateTime   @default(now())
+  syncedAt   DateTime?
+
+  @@index([userId, syncStatus])
+  @@map("offline_sync_queue")
+}
+
+// ─────────────────────────────────────────────
+// AUDIT LOG
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  hospitalId String?
+  action     String
+  resource   String
+  resourceId String?
+  ipAddress  String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([hospitalId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

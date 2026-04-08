@@ -1,0 +1,53 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: meditir-db
+    environment:
+      POSTGRES_USER: meditir_user
+      POSTGRES_PASSWORD: meditir_password
+      POSTGRES_DB: meditir_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - meditir_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U meditir_user -d meditir_db']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./meditir-api
+      dockerfile: Dockerfile
+    container_name: meditir-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://meditir_user:meditir_password@postgres:5432/meditir_db
+    env_file:
+      - ./meditir-api/.env
+    ports:
+      - '4000:4000'
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./meditir-web
+      dockerfile: Dockerfile
+    container_name: meditir-web
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: http://api:4000/api/v1
+      NEXT_PUBLIC_SOCKET_URL: http://api:4000
+    ports:
+      - '3000:3000'
+    restart: unless-stopped
+
+volumes:
+  meditir_pg_data:
