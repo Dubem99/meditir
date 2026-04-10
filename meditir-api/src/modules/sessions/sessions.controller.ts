@@ -5,7 +5,8 @@ import { AppError } from '../../utils/AppError';
 import * as soapService from '../soap-notes/soap-notes.service';
 
 export const create = async (req: Request, res: Response): Promise<void> => {
-  const session = await service.createSession(hospitalId(req), req.body);
+  if (!req.user) throw new AppError('Authentication required', 401);
+  const session = await service.createSession(hospitalId(req), req.body, req.user.id);
   res.status(201).json({ status: 'success', data: session });
 };
 
@@ -15,7 +16,7 @@ export const list = async (req: Request, res: Response): Promise<void> => {
     hospitalId(req),
     req.user.id,
     req.user.role,
-    req.query as { page?: number; limit?: number }
+    req.query as { page?: number; limit?: number; search?: string }
   );
   res.json({ status: 'success', ...result });
 };
@@ -42,9 +43,7 @@ export const end = async (req: Request, res: Response): Promise<void> => {
   const sid = param(req, 'id');
   const session = await service.endSession(sid, hid, req.user.id);
 
-  soapService.generateSOAPNote(sid, hid).catch(() => {
-    // Non-blocking: SOAP can be regenerated manually
-  });
+  soapService.generateSOAPNote(sid, hid).catch(() => {});
 
   res.json({ status: 'success', data: session, message: 'SOAP note generation started' });
 };
@@ -52,4 +51,23 @@ export const end = async (req: Request, res: Response): Promise<void> => {
 export const cancel = async (req: Request, res: Response): Promise<void> => {
   await service.cancelSession(param(req, 'id'), hospitalId(req));
   res.json({ status: 'success', message: 'Session cancelled' });
+};
+
+export const handover = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new AppError('Authentication required', 401);
+  const { toDoctorId, handoverNote } = req.body;
+  if (!toDoctorId) throw new AppError('toDoctorId is required', 400);
+  const session = await service.handoverSession(
+    param(req, 'id'),
+    hospitalId(req),
+    req.user.id,
+    toDoctorId,
+    handoverNote || ''
+  );
+  res.json({ status: 'success', data: session });
+};
+
+export const analytics = async (req: Request, res: Response): Promise<void> => {
+  const data = await service.getAnalytics(hospitalId(req));
+  res.json({ status: 'success', data });
 };

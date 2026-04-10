@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { getPendingTranscriptions, markTranscriptionsSynced } from '@/lib/indexedDB';
 
 export const useOfflineSync = (sessionId?: string) => {
-  const { isOnline, setOnline } = useOfflineStore();
+  const { isOnline, setOnline, resetPending } = useOfflineStore();
 
   useEffect(() => {
     const handleOnline = () => setOnline(true);
@@ -43,7 +43,7 @@ export const useOfflineSync = (sessionId?: string) => {
 
         const ids = pending.map((p) => p.id!);
         await markTranscriptionsSynced(ids);
-        console.log(`Synced ${ids.length} offline transcription(s)`);
+        resetPending();
       } catch (err) {
         console.error('Offline sync failed', err);
       }

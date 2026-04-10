@@ -246,6 +246,9 @@ model ConsultationSession {
   roomToken String? @unique
   notes     String?
 
+  handoverNote         String?
+  originalDoctorId     String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -306,6 +309,7 @@ model SOAPNote {
 
   ttsAudioUrl    String?
   ttsGeneratedAt DateTime?
+  drugWarnings   String?   // JSON: string[] of interaction warnings
 
   doctorSignedAt DateTime?
   createdAt      DateTime  @default(now())

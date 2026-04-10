@@ -84,6 +84,8 @@ export interface ConsultationSession {
   dialect: Dialect;
   roomToken?: string;
   notes?: string;
+  handoverNote?: string;
+  originalDoctorId?: string;
   doctor: { id: string; firstName: string; lastName: string; specialization: string };
   patient: { id: string; firstName: string; lastName: string; medicalRecordNo?: string };
   soapNote?: { id: string; status: NoteStatus } | null;
@@ -114,6 +116,7 @@ export interface SOAPNote {
   aiModel?: string;
   ttsAudioUrl?: string;
   ttsGeneratedAt?: string;
+  drugWarnings?: string | null;
   doctorSignedAt?: string;
   createdAt: string;
   updatedAt: string;

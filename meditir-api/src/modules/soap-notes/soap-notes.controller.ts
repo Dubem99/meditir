@@ -5,6 +5,12 @@ import { param, hospitalId } from '../../utils/params';
 import { AppError } from '../../utils/AppError';
 import { prisma } from '../../config/database';
 
+export const listMyNotes = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new AppError('Authentication required', 401);
+  const notes = await service.listPatientNotes(req.user.id, hospitalId(req));
+  res.json({ status: 'success', data: notes });
+};
+
 export const generate = async (req: Request, res: Response): Promise<void> => {
   const note = await service.generateSOAPNote(req.body.sessionId, hospitalId(req));
   res.status(201).json({ status: 'success', data: note });

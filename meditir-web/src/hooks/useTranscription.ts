@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useAudioRecorder } from './useAudioRecorder';
 import { useOfflineStore } from '@/store/offline.store';
 import { useSessionStore } from '@/store/session.store';
 import { connectSocket, getSocket, joinSession, leaveSession } from '@/lib/socket';
 import { storeOfflineTranscription } from '@/lib/indexedDB';
+import { api } from '@/lib/api';
 import type { Dialect, Transcription } from '@/types/entities.types';
 
 export const useTranscription = (
@@ -13,11 +14,12 @@ export const useTranscription = (
   roomToken: string,
   dialect: Dialect
 ) => {
-  const { isOnline } = useOfflineStore();
+  const { isOnline, incrementPending } = useOfflineStore();
   const { addTranscription, setRecording } = useSessionStore();
   const recorder = useAudioRecorder(dialect);
   const startMsRef = useRef(Date.now());
   const interimRef = useRef<string>('');
+  const [interimText, setInterimText] = useState<string>('');
 
   // Connect socket and join room on mount
   useEffect(() => {
@@ -38,22 +40,23 @@ export const useTranscription = (
     ({ text, isFinal }: { text: string; isFinal: boolean }) => {
       if (!isFinal) {
         interimRef.current = text;
+        setInterimText(text);
         return;
       }
 
-      // Only send final segments
+      // Final segment — clear interim display and save
       interimRef.current = '';
+      setInterimText('');
       const startMs = Date.now() - startMsRef.current;
 
       if (isOnline) {
-        // Send text (not audio) to server via socket
-        getSocket().emit('transcription:text_segment', {
-          sessionId,
-          text,
-          speakerTag: 'DOCTOR',
-          startMs,
-          dialect,
-        });
+        // Save via REST (reliable) — also emit via socket for live room broadcasting
+        api.post('/transcriptions/segment', { sessionId, text, speakerTag: 'DOCTOR', startMs, dialect })
+          .then((res) => { addTranscription(res.data.data); })
+          .catch(() => {
+            // Socket fallback
+            getSocket().emit('transcription:text_segment', { sessionId, text, speakerTag: 'DOCTOR', startMs, dialect });
+          });
       } else {
         storeOfflineTranscription({
           sessionId,
@@ -64,6 +67,7 @@ export const useTranscription = (
           createdAt: Date.now(),
           synced: false,
         });
+        incrementPending();
       }
     },
     [sessionId, dialect, isOnline]
@@ -87,5 +91,6 @@ export const useTranscription = (
     error: recorder.error,
     isSupported: recorder.isSupported,
     isOnline,
+    interimText,
   };
 };
