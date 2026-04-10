@@ -22,7 +22,7 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
 
   const transcriptions = useSessionStore((s) => s.transcriptions);
   const { isOnline } = useOfflineSync(session.id);
-  const { isRecording, startTranscription, stopTranscription, error, isSupported } = useTranscription(
+  const { isRecording, startTranscription, stopTranscription, error, isSupported, interimText } = useTranscription(
     session.id,
     session.roomToken!,
     dialect
@@ -35,10 +35,10 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
     return () => clearInterval(interval);
   }, [isRecording]);
 
-  // Auto-scroll transcript
+  // Auto-scroll transcript on new final segments and on interim updates
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [transcriptions]);
+  }, [transcriptions, interimText]);
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -84,7 +84,7 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
             onClick={() => setShowDialect(!showDialect)}
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors"
           >
-            {dialect.replace(/_/g, ' ')}
+            Dialect
           </button>
           <button
             onClick={handleEnd}
@@ -146,17 +146,28 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
             <span className="text-xs text-gray-400">{transcriptions.length} segments</span>
           </div>
           <div className="p-5 overflow-y-auto max-h-96 space-y-3">
-            {transcriptions.length === 0 ? (
+            {transcriptions.length === 0 && !interimText ? (
               <p className="text-gray-400 text-sm text-center py-8">
-                {isRecording ? 'Listening...' : 'Start recording to see live transcript'}
+                {isRecording ? 'Listening... speak now' : 'Start recording to see live transcript'}
               </p>
             ) : (
-              transcriptions.map((t) => (
-                <div key={t.id} className="flex gap-3">
-                  <div className="w-1.5 h-1.5 rounded-full bg-primary-400 mt-2 shrink-0" />
-                  <p className="text-sm text-gray-800 leading-relaxed">{t.text}</p>
-                </div>
-              ))
+              <>
+                {transcriptions.map((t) => (
+                  <div key={t.id} className="flex gap-3">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary-400 mt-2 shrink-0" />
+                    <p className="text-sm text-gray-800 leading-relaxed">{t.text}</p>
+                  </div>
+                ))}
+                {interimText && (
+                  <div className="flex gap-3">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary-300 mt-2 shrink-0 animate-pulse" />
+                    <p className="text-sm text-gray-500 leading-relaxed italic">
+                      {interimText}
+                      <span className="inline-block w-0.5 h-3 bg-primary-400 ml-0.5 animate-pulse align-middle" />
+                    </p>
+                  </div>
+                )}
+              </>
             )}
             <div ref={transcriptEndRef} />
           </div>

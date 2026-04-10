@@ -14,11 +14,12 @@ export const useTranscription = (
   roomToken: string,
   dialect: Dialect
 ) => {
-  const { isOnline, incrementPending } = useOfflineStore();
-  const { addTranscription, setRecording } = useSessionStore();
+  const isOnline = useOfflineStore((s) => s.isOnline);
+  const incrementPending = useOfflineStore((s) => s.incrementPending);
+  const addTranscription = useSessionStore((s) => s.addTranscription);
+  const setRecording = useSessionStore((s) => s.setRecording);
   const recorder = useAudioRecorder(dialect);
   const startMsRef = useRef(Date.now());
-  const interimRef = useRef<string>('');
   const [interimText, setInterimText] = useState<string>('');
 
   // Connect socket and join room on mount
@@ -26,61 +27,83 @@ export const useTranscription = (
     const socket = connectSocket();
     joinSession(roomToken);
 
-    socket.on('transcription:new_segment', (segment: Transcription) => {
-      addTranscription(segment);
-    });
+    const handler = (segment: Transcription) => addTranscription(segment);
+    socket.on('transcription:new_segment', handler);
 
     return () => {
       leaveSession(roomToken);
-      socket.off('transcription:new_segment');
+      socket.off('transcription:new_segment', handler);
     };
   }, [roomToken, addTranscription]);
 
-  const handleSegment = useCallback(
-    ({ text, isFinal }: { text: string; isFinal: boolean }) => {
-      if (!isFinal) {
-        interimRef.current = text;
-        setInterimText(text);
-        return;
-      }
+  // Stable ref to the latest segment handler so the recorder always calls
+  // fresh state (isOnline, dialect, etc) without needing to restart.
+  const handleSegmentRef = useRef<(s: { text: string; isFinal: boolean }) => void>(() => {});
+  handleSegmentRef.current = ({ text, isFinal }) => {
+    if (!text) return;
 
-      // Final segment — clear interim display and save
-      interimRef.current = '';
-      setInterimText('');
-      const startMs = Date.now() - startMsRef.current;
+    if (!isFinal) {
+      setInterimText(text);
+      return;
+    }
 
-      if (isOnline) {
-        // Save via REST (reliable) — also emit via socket for live room broadcasting
-        api.post('/transcriptions/segment', { sessionId, text, speakerTag: 'DOCTOR', startMs, dialect })
-          .then((res) => { addTranscription(res.data.data); })
-          .catch(() => {
-            // Socket fallback
-            getSocket().emit('transcription:text_segment', { sessionId, text, speakerTag: 'DOCTOR', startMs, dialect });
+    // Final segment — clear interim display and persist
+    setInterimText('');
+    const startMs = Date.now() - startMsRef.current;
+
+    if (isOnline) {
+      api
+        .post('/transcriptions/segment', { sessionId, text, speakerTag: 'DOCTOR', startMs, dialect })
+        .then((res) => addTranscription(res.data.data))
+        .catch(() => {
+          // Socket fallback — still shows the final locally so the doctor sees it
+          addTranscription({
+            id: `local-${Date.now()}`,
+            sessionId,
+            text,
+            speakerTag: 'DOCTOR',
+            startMs,
+            dialect,
+            createdAt: new Date().toISOString(),
           });
-      } else {
-        storeOfflineTranscription({
-          sessionId,
-          text,
-          dialect,
-          speakerTag: 'DOCTOR',
-          startMs,
-          createdAt: Date.now(),
-          synced: false,
+          try {
+            getSocket().emit('transcription:text_segment', { sessionId, text, speakerTag: 'DOCTOR', startMs, dialect });
+          } catch {}
         });
-        incrementPending();
-      }
-    },
-    [sessionId, dialect, isOnline]
-  );
+    } else {
+      // Offline — show locally and queue for sync
+      addTranscription({
+        id: `offline-${Date.now()}`,
+        sessionId,
+        text,
+        speakerTag: 'DOCTOR',
+        startMs,
+        dialect,
+        createdAt: new Date().toISOString(),
+      });
+      storeOfflineTranscription({
+        sessionId,
+        text,
+        dialect,
+        speakerTag: 'DOCTOR',
+        startMs,
+        createdAt: Date.now(),
+        synced: false,
+      });
+      incrementPending();
+    }
+  };
 
   const startTranscription = useCallback(() => {
     startMsRef.current = Date.now();
-    recorder.startRecording(handleSegment);
+    setInterimText('');
+    recorder.startRecording((seg) => handleSegmentRef.current(seg));
     setRecording(true);
-  }, [recorder, handleSegment, setRecording]);
+  }, [recorder, setRecording]);
 
   const stopTranscription = useCallback(() => {
     recorder.stopRecording();
+    setInterimText('');
     setRecording(false);
   }, [recorder, setRecording]);
 
