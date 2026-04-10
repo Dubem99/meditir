@@ -5,24 +5,15 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import type { Dialect } from '@/types/entities.types';
 
 interface Props {
   onClose: () => void;
 }
 
-const DIALECTS: { value: Dialect; label: string }[] = [
-  { value: 'NIGERIAN_ENGLISH', label: 'Nigerian English' },
-  { value: 'YORUBA_ACCENTED', label: 'Yoruba Accented' },
-  { value: 'HAUSA_ACCENTED', label: 'Hausa Accented' },
-  { value: 'IGBO_ACCENTED', label: 'Igbo Accented' },
-];
-
 export const NewConsultationModal = ({ onClose }: Props) => {
   const router = useRouter();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [dialect, setDialect] = useState<Dialect>('NIGERIAN_ENGLISH');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -40,7 +31,7 @@ export const NewConsultationModal = ({ onClose }: Props) => {
         id: demoSessionId,
         patient: { id: 'p1', firstName, lastName, medicalRecordNo: '' },
         status: 'IN_PROGRESS',
-        dialect,
+        dialect: 'NIGERIAN_ENGLISH',
         roomToken: 'demo-room',
         scheduledAt: new Date().toISOString(),
         doctor: { id: 'd1', firstName: 'Demo', lastName: 'Doctor', specialization: 'General Practice' },
@@ -62,7 +53,7 @@ export const NewConsultationModal = ({ onClose }: Props) => {
 
       const sessionRes = await api.post('/sessions', {
         patientId,
-        dialect,
+        dialect: 'NIGERIAN_ENGLISH',
         scheduledAt: new Date().toISOString(),
       });
       const sessionId = sessionRes.data.data.id;
@@ -107,26 +98,6 @@ export const NewConsultationModal = ({ onClose }: Props) => {
               placeholder="Okafor"
               required
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Language / Dialect</label>
-            <div className="grid grid-cols-2 gap-2">
-              {DIALECTS.map((d) => (
-                <button
-                  key={d.value}
-                  type="button"
-                  onClick={() => setDialect(d.value)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium border transition-all ${
-                    dialect === d.value
-                      ? 'bg-primary-600 text-white border-primary-600'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-primary-300'
-                  }`}
-                >
-                  {d.label}
-                </button>
-              ))}
-            </div>
           </div>
 
           {error && (
