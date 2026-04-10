@@ -184,16 +184,7 @@ export default function SessionPage() {
 
   return (
     <>
-      {/* Print styles */}
-      <style>{`
-        @media print {
-          body > * { display: none !important; }
-          #print-area { display: block !important; }
-          #print-area { position: fixed; top: 0; left: 0; width: 100%; }
-        }
-      `}</style>
-
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-3xl mx-auto print:max-w-none">
         {/* Back */}
         <button
           onClick={() => router.push('/doctor')}

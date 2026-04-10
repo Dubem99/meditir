@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { clsx } from 'clsx';
 import { useAuthStore } from '@/store/auth.store';
 import { api } from '@/lib/api';
@@ -77,7 +78,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: '/admin/onboarding',
-    label: 'Onboarding',
+    label: 'Onboard',
     roles: ['HOSPITAL_ADMIN'],
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -107,14 +108,28 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
+const Logo = () => (
+  <div className="flex items-center gap-2.5">
+    <div className="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
+      <svg className="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 15c1.66 0 3-1.34 3-3V6c0-1.66-1.34-3-3-3S9 4.34 9 6v6c0 1.66 1.34 3 3 3z" />
+        <path d="M17 12c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-2.08c3.39-.49 6-3.39 6-6.92h-2z" />
+      </svg>
+    </div>
+    <span className="font-bold text-gray-900">Meditir</span>
+  </div>
+);
+
 export const Sidebar = () => {
   const pathname = usePathname();
   const router = useRouter();
   const { user, clearAuth } = useAuthStore();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   if (!user) return null;
 
   const visibleItems = NAV_ITEMS.filter((item) => item.roles.includes(user.role));
+  const initials = user.email.slice(0, 2).toUpperCase();
 
   const handleLogout = async () => {
     try { await api.post('/auth/logout'); } catch {}
@@ -122,64 +137,119 @@ export const Sidebar = () => {
     router.push('/login');
   };
 
-  const initials = user.email.slice(0, 2).toUpperCase();
+  const isActive = (href: string) =>
+    href === '/doctor' || href === '/admin' || href === '/superadmin' || href === '/patient'
+      ? pathname === href
+      : pathname === href || pathname.startsWith(`${href}/`);
+
+  const NavLinks = ({ onClick }: { onClick?: () => void }) => (
+    <>
+      {visibleItems.map((item) => (
+        <Link
+          key={item.href}
+          href={item.href}
+          onClick={onClick}
+          className={clsx(
+            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+            isActive(item.href)
+              ? 'bg-primary-50 text-primary-700'
+              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+          )}
+        >
+          <span className={isActive(item.href) ? 'text-primary-600' : 'text-gray-400'}>{item.icon}</span>
+          {item.label}
+        </Link>
+      ))}
+    </>
+  );
 
   return (
-    <aside className="flex flex-col w-56 bg-white border-r border-gray-100 min-h-screen shrink-0">
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 py-5">
-        <div className="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center">
-          <svg className="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M12 15c1.66 0 3-1.34 3-3V6c0-1.66-1.34-3-3-3S9 4.34 9 6v6c0 1.66 1.34 3 3 3z" />
-            <path d="M17 12c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-2.08c3.39-.49 6-3.39 6-6.92h-2z" />
-          </svg>
+    <>
+      {/* ── Desktop sidebar ── */}
+      <aside className="hidden md:flex print:hidden flex-col w-56 bg-white border-r border-gray-100 min-h-screen shrink-0">
+        <div className="flex items-center gap-2.5 px-5 py-5">
+          <Logo />
         </div>
-        <span className="font-bold text-gray-900">Meditir</span>
-      </div>
-
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-2 space-y-0.5">
-        {visibleItems.map((item) => {
-          const isActive =
-            item.href === '/doctor'
-              ? pathname === '/doctor'
-              : pathname === item.href || pathname.startsWith(`${item.href}/`);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={clsx(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-primary-50 text-primary-700'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-              )}
-            >
-              <span className={isActive ? 'text-primary-600' : 'text-gray-400'}>{item.icon}</span>
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* User + logout */}
-      <div className="px-3 py-4 border-t border-gray-100 space-y-1">
-        <div className="flex items-center gap-3 px-3 py-2">
-          <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-semibold text-xs shrink-0">
-            {initials}
+        <nav className="flex-1 px-3 py-2 space-y-0.5">
+          <NavLinks />
+        </nav>
+        <div className="px-3 py-4 border-t border-gray-100 space-y-1">
+          <div className="flex items-center gap-3 px-3 py-2">
+            <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-semibold text-xs shrink-0">
+              {initials}
+            </div>
+            <p className="text-xs text-gray-600 truncate flex-1">{user.email}</p>
           </div>
-          <p className="text-xs text-gray-600 truncate flex-1">{user.email}</p>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+          >
+            <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Sign out
+          </button>
         </div>
+      </aside>
+
+      {/* ── Mobile top bar ── */}
+      <div className="md:hidden print:hidden fixed top-0 inset-x-0 z-40 flex items-center justify-between px-4 h-14 bg-white border-b border-gray-100">
+        <Logo />
         <button
-          onClick={handleLogout}
-          className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+          onClick={() => setMobileOpen(true)}
+          className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
+          aria-label="Open menu"
         >
-          <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
-          Sign out
         </button>
       </div>
-    </aside>
+
+      {/* ── Mobile drawer overlay ── */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setMobileOpen(false)}
+          />
+          {/* Drawer */}
+          <div className="relative flex flex-col w-72 max-w-[85vw] bg-white h-full shadow-xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <Logo />
+              <button
+                onClick={() => setMobileOpen(false)}
+                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+              <NavLinks onClick={() => setMobileOpen(false)} />
+            </nav>
+            <div className="px-3 py-4 border-t border-gray-100 space-y-1">
+              <div className="flex items-center gap-3 px-3 py-2">
+                <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-semibold text-sm shrink-0">
+                  {initials}
+                </div>
+                <p className="text-xs text-gray-600 truncate flex-1">{user.email}</p>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+              >
+                <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };

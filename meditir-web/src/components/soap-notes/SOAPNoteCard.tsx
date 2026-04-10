@@ -58,7 +58,7 @@ export const SOAPNoteCard = ({ note, showActions, onFinalize }: Props) => {
             {note.doctorSignedAt && ' · Signed'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 print:hidden">
           <button
             onClick={handleCopyAll}
             className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 hover:border-gray-300 px-3 py-1.5 rounded-lg transition-colors"
@@ -103,7 +103,7 @@ export const SOAPNoteCard = ({ note, showActions, onFinalize }: Props) => {
             {showActions && note.status !== 'FINALIZED' && editing !== key && (
               <button
                 onClick={() => setEditing(key)}
-                className="text-xs text-primary-600 hover:text-primary-800 opacity-0 group-hover:opacity-100 transition-opacity font-medium"
+                className="text-xs text-primary-600 hover:text-primary-800 opacity-0 group-hover:opacity-100 transition-opacity font-medium print:hidden"
               >
                 Edit
               </button>
@@ -145,7 +145,7 @@ export const SOAPNoteCard = ({ note, showActions, onFinalize }: Props) => {
 
       {/* Finalize */}
       {showActions && note.status !== 'FINALIZED' && onFinalize && (
-        <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+        <div className="flex items-center justify-between pt-4 border-t border-gray-100 print:hidden">
           <p className="text-sm text-gray-500">Review the note above before signing.</p>
           <button
             onClick={onFinalize}
