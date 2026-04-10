@@ -5,6 +5,7 @@ import { config } from '../../config';
 import { AppError } from '../../utils/AppError';
 import { NoteStatus } from '../../types/enums';
 import { buildTranscriptText } from '../transcription/transcription.service';
+import { extractFromSOAPNote } from '../ehr-extractions/ehr-extractions.service';
 import { logger } from '../../utils/logger';
 
 const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
@@ -162,6 +163,11 @@ Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None docu
       metadata: { sessionId, promptVersion: config.SOAP_PROMPT_VERSION },
     },
   });
+
+  // Awaited so extractions are persisted before the client fetches the session
+  await extractFromSOAPNote(note.id).catch((err) =>
+    logger.error('EHR extraction failed (non-fatal)', { error: err, soapNoteId: note.id })
+  );
 
   return note;
 };

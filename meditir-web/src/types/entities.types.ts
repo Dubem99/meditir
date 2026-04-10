@@ -126,3 +126,50 @@ export interface SOAPNote {
   };
   patient?: { firstName: string; lastName: string; medicalRecordNo?: string };
 }
+
+export type ProblemStatus = 'ACTIVE' | 'RESOLVED' | 'CHRONIC' | 'RULE_OUT';
+export type OrderType = 'MEDICATION' | 'LAB' | 'IMAGING' | 'PROCEDURE' | 'REFERRAL';
+export type OrderStatus = 'PENDING' | 'ORDERED' | 'COMPLETED' | 'CANCELLED';
+export type ExtractionSource = 'AI_EXTRACTED' | 'DOCTOR_ADDED' | 'DOCTOR_EDITED';
+
+export interface Problem {
+  id: string;
+  soapNoteId: string;
+  name: string;
+  icd10Code?: string | null;
+  status: ProblemStatus;
+  notes?: string | null;
+  source: ExtractionSource;
+  createdAt: string;
+}
+
+export interface Order {
+  id: string;
+  soapNoteId: string;
+  type: OrderType;
+  name: string;
+  dosage?: string | null;
+  frequency?: string | null;
+  duration?: string | null;
+  instructions?: string | null;
+  status: OrderStatus;
+  source: ExtractionSource;
+  createdAt: string;
+}
+
+export interface BillingCode {
+  id: string;
+  soapNoteId: string;
+  codeType: 'ICD10' | 'CPT';
+  code: string;
+  description: string;
+  source: ExtractionSource;
+  createdAt: string;
+}
+
+export interface EhrExtractions {
+  soapNoteId: string;
+  problems: Problem[];
+  orders: Order[];
+  billingCodes: BillingCode[];
+}

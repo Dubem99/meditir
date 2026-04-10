@@ -53,6 +53,28 @@ enum Dialect {
   IGBO_ACCENTED
 }
 
+enum ProblemStatus {
+  ACTIVE
+  RESOLVED
+  CHRONIC
+  RULE_OUT
+}
+
+enum OrderType {
+  MEDICATION
+  LAB
+  IMAGING
+  PROCEDURE
+  REFERRAL
+}
+
+enum OrderStatus {
+  PENDING
+  ORDERED
+  COMPLETED
+  CANCELLED
+}
+
 // ─────────────────────────────────────────────
 // MULTI-TENANT CORE
 // ─────────────────────────────────────────────
@@ -315,9 +337,84 @@ model SOAPNote {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  problems     Problem[]
+  orders       Order[]
+  billingCodes BillingCode[]
+
   @@index([hospitalId])
   @@index([patientId])
   @@map("soap_notes")
+}
+
+// ─────────────────────────────────────────────
+// EHR STRUCTURED EXTRACTIONS
+// ─────────────────────────────────────────────
+
+model Problem {
+  id         String        @id @default(uuid())
+  soapNoteId String
+  soapNote   SOAPNote      @relation(fields: [soapNoteId], references: [id], onDelete: Cascade)
+  hospitalId String
+  patientId  String
+
+  name       String
+  icd10Code  String?
+  status     ProblemStatus @default(ACTIVE)
+  notes      String?
+
+  source     String        @default("AI_EXTRACTED") // AI_EXTRACTED | DOCTOR_ADDED | DOCTOR_EDITED
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([soapNoteId])
+  @@index([patientId])
+  @@index([hospitalId])
+  @@map("problems")
+}
+
+model Order {
+  id         String       @id @default(uuid())
+  soapNoteId String
+  soapNote   SOAPNote     @relation(fields: [soapNoteId], references: [id], onDelete: Cascade)
+  hospitalId String
+  patientId  String
+
+  type         OrderType
+  name         String
+  dosage       String?
+  frequency    String?
+  duration     String?
+  instructions String?
+  status       OrderStatus @default(PENDING)
+
+  source    String   @default("AI_EXTRACTED")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([soapNoteId])
+  @@index([patientId])
+  @@index([hospitalId])
+  @@map("orders")
+}
+
+model BillingCode {
+  id         String   @id @default(uuid())
+  soapNoteId String
+  soapNote   SOAPNote @relation(fields: [soapNoteId], references: [id], onDelete: Cascade)
+  hospitalId String
+  patientId  String
+
+  codeType    String // ICD10 | CPT
+  code        String
+  description String
+
+  source    String   @default("AI_EXTRACTED")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([soapNoteId])
+  @@index([hospitalId])
+  @@map("billing_codes")
 }
 
 // ─────────────────────────────────────────────

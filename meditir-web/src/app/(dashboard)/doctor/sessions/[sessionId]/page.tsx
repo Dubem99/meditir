@@ -5,10 +5,11 @@ import { useParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { TranscriptionRoom } from '@/components/transcription/TranscriptionRoom';
 import { SOAPNoteCard } from '@/components/soap-notes/SOAPNoteCard';
+import { ExtractionsPanel } from '@/components/soap-notes/ExtractionsPanel';
 import { TTSPlayer } from '@/components/tts/TTSPlayer';
 import { Spinner } from '@/components/ui/Spinner';
 import { useSessionStore } from '@/store/session.store';
-import type { ConsultationSession, Doctor, SOAPNote } from '@/types/entities.types';
+import type { ConsultationSession, Doctor, SOAPNote, EhrExtractions } from '@/types/entities.types';
 import { format } from 'date-fns';
 
 const formatDuration = (startedAt?: string, endedAt?: string) => {
@@ -25,8 +26,9 @@ export default function SessionPage() {
 
   const [session, setSession] = useState<ConsultationSession | null>(null);
   const [soapNote, setSOAPNote] = useState<SOAPNote | null>(null);
+  const [extractions, setExtractions] = useState<EhrExtractions | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'room' | 'note' | 'generating' | 'generate-failed'>('room');
+  const [view, setView] = useState<'room' | 'note' | 'ehr' | 'generating' | 'generate-failed'>('room');
   const [retrying, setRetrying] = useState(false);
 
   // Handover state
@@ -74,6 +76,26 @@ export default function SessionPage() {
     load();
     return () => clearSession();
   }, [sessionId]);
+
+  // Fetch structured extractions whenever we have a SOAP note (skip demo sessions)
+  useEffect(() => {
+    if (!soapNote?.id || soapNote.id.startsWith('demo-')) {
+      setExtractions(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get(`/ehr-extractions/session/${sessionId}`)
+      .then((res) => {
+        if (!cancelled) setExtractions(res.data.data);
+      })
+      .catch(() => {
+        if (!cancelled) setExtractions({ soapNoteId: soapNote.id, problems: [], orders: [], billingCodes: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [soapNote?.id, sessionId]);
 
   const handleSessionEnd = (sid: string) => {
     clearSession();
@@ -222,7 +244,7 @@ export default function SessionPage() {
         {session.status === 'COMPLETED' && soapNote && (
           <div className="flex items-center justify-between mb-6 print:hidden">
             <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
-              {(['room', 'note'] as const).map((v) => (
+              {(['room', 'note', 'ehr'] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
@@ -230,7 +252,7 @@ export default function SessionPage() {
                     view === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  {v === 'room' ? 'Transcript' : 'Clinical Note'}
+                  {v === 'room' ? 'Transcript' : v === 'note' ? 'Clinical Note' : 'Structured Data'}
                 </button>
               ))}
             </div>
@@ -382,6 +404,25 @@ export default function SessionPage() {
             >
               {retrying ? 'Retrying…' : 'Generate Note'}
             </button>
+          </div>
+        )}
+
+        {/* Structured data view */}
+        {view === 'ehr' && soapNote && (
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            {extractions ? (
+              <ExtractionsPanel
+                sessionId={sessionId}
+                extractions={extractions}
+                onChange={setExtractions}
+                readOnly={soapNote.status === 'FINALIZED'}
+              />
+            ) : (
+              <div className="py-10 text-center">
+                <Spinner size="md" />
+                <p className="text-sm text-gray-400 mt-3">Loading structured data…</p>
+              </div>
+            )}
           </div>
         )}
 
