@@ -294,8 +294,61 @@ export default function SessionPage() {
         {/* Transcript view for completed session */}
         {view === 'room' && session.status === 'COMPLETED' && (
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Transcript</h3>
-            <p className="text-sm text-gray-500">Transcript archived. Switch to Clinical Note view.</p>
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="font-semibold text-gray-900">Consultation Transcript</h3>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {session.transcriptions?.length
+                    ? `${session.transcriptions.length} segment${session.transcriptions.length !== 1 ? 's' : ''}`
+                    : 'No transcript recorded'}
+                </p>
+              </div>
+              {session.transcriptions && session.transcriptions.length > 0 && (
+                <span className="text-xs bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full font-medium">
+                  {session.dialect?.replace(/_/g, ' ')}
+                </span>
+              )}
+            </div>
+
+            {!session.transcriptions || session.transcriptions.length === 0 ? (
+              <div className="text-center py-10">
+                <svg className="h-10 w-10 text-gray-200 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-7a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+                <p className="text-sm text-gray-400">No transcript segments were recorded for this session.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {session.transcriptions.map((t, i) => (
+                  <div key={t.id} className="flex gap-3 group">
+                    {/* Timestamp bubble */}
+                    <div className="shrink-0 pt-0.5">
+                      {t.startMs != null ? (
+                        <span className="inline-block text-[10px] font-mono text-gray-400 bg-gray-50 border border-gray-100 rounded px-1.5 py-0.5 min-w-[44px] text-center tabular-nums">
+                          {Math.floor(t.startMs / 60000)}:{String(Math.floor((t.startMs % 60000) / 1000)).padStart(2, '0')}
+                        </span>
+                      ) : (
+                        <span className="inline-block text-[10px] font-mono text-gray-300 bg-gray-50 border border-gray-100 rounded px-1.5 py-0.5 min-w-[44px] text-center tabular-nums">
+                          {String(i + 1).padStart(2, '0')}
+                        </span>
+                      )}
+                    </div>
+                    {/* Speaker + text */}
+                    <div className="flex-1 min-w-0">
+                      {t.speakerTag && (
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-0.5">
+                          {t.speakerTag}
+                        </p>
+                      )}
+                      <p className="text-sm text-gray-800 leading-relaxed">{t.text}</p>
+                      {t.confidence != null && t.confidence < 0.7 && (
+                        <p className="text-[10px] text-amber-500 mt-0.5">Low confidence</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

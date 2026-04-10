@@ -89,6 +89,7 @@ export interface ConsultationSession {
   doctor: { id: string; firstName: string; lastName: string; specialization: string };
   patient: { id: string; firstName: string; lastName: string; medicalRecordNo?: string };
   soapNote?: { id: string; status: NoteStatus } | null;
+  transcriptions?: Transcription[];
 }
 
 export interface Transcription {
