@@ -9,6 +9,7 @@ import {
 import { AppError } from '../../utils/AppError';
 import { Role } from '../../types/enums';
 import type { RegisterHospitalInput, LoginInput } from './auth.schema';
+import { sendOnboardingEmail } from '../../services/email.service';
 
 export const registerHospital = async (data: RegisterHospitalInput) => {
   const existingSlug = await prisma.hospital.findUnique({
@@ -51,6 +52,14 @@ export const registerHospital = async (data: RegisterHospitalInput) => {
 
     return { hospital, user };
   });
+
+  // Send onboarding email — fire and forget, don't block registration
+  sendOnboardingEmail({
+    adminEmail: data.adminEmail,
+    adminFirstName: data.adminFirstName,
+    hospitalName: data.hospitalName,
+    hospitalSlug: data.hospitalSlug,
+  }).catch((err) => console.error('[email] Failed to send onboarding email:', err));
 
   return result;
 };
