@@ -243,3 +243,131 @@ export const sendOnboardingEmail = async ({
     html,
   });
 };
+
+// Minimal markdown → HTML for AVS content (H2 headings, bullets, bold, line breaks).
+// Intentionally small — no external deps, trusted input (Claude output we control).
+const markdownToSafeHtml = (md: string): string => {
+  const escape = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const lines = escape(md).split(/\r?\n/);
+  const out: string[] = [];
+  let inList = false;
+
+  const flushList = () => {
+    if (inList) {
+      out.push('</ul>');
+      inList = false;
+    }
+  };
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (/^##\s+/.test(line)) {
+      flushList();
+      out.push(
+        `<h2 style="color:#111827;font-size:16px;font-weight:700;margin:24px 0 8px;">${line.replace(/^##\s+/, '')}</h2>`
+      );
+    } else if (/^[-*]\s+/.test(line)) {
+      if (!inList) {
+        out.push('<ul style="margin:8px 0 8px 20px;padding:0;color:#374151;font-size:14px;line-height:1.6;">');
+        inList = true;
+      }
+      out.push(`<li style="margin:4px 0;">${line.replace(/^[-*]\s+/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`);
+    } else if (line.length === 0) {
+      flushList();
+    } else {
+      flushList();
+      out.push(
+        `<p style="color:#374151;font-size:14px;line-height:1.6;margin:8px 0;">${line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`
+      );
+    }
+  }
+  flushList();
+  return out.join('\n');
+};
+
+const languageSubjects: Record<string, string> = {
+  ENGLISH: 'Your visit summary',
+  PIDGIN: 'Your visit summary',
+  YORUBA: 'Àkọsílẹ̀ ìbẹ̀wò rẹ',
+  HAUSA: 'Taƙaitaccen ziyarar ku',
+  IGBO: 'Nchịkọta nleta gị',
+};
+
+export const sendPatientSummaryEmail = async ({
+  patientEmail,
+  patientFirstName,
+  doctorName,
+  hospitalName,
+  contentMarkdown,
+  language,
+}: {
+  patientEmail: string;
+  patientFirstName: string;
+  doctorName: string;
+  hospitalName: string;
+  contentMarkdown: string;
+  language: 'ENGLISH' | 'PIDGIN' | 'YORUBA' | 'HAUSA' | 'IGBO';
+}) => {
+  const resend = getResend();
+  if (!resend) {
+    console.warn('[email] RESEND_API_KEY not set — skipping patient summary email');
+    return;
+  }
+
+  const bodyHtml = markdownToSafeHtml(contentMarkdown);
+  const subject = `${languageSubjects[language] ?? languageSubjects.ENGLISH} — ${hospitalName}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${subject}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Inter,system-ui,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.06);">
+          <tr>
+            <td style="background:#030c0b;padding:32px 40px;">
+              <p style="color:#4db0a8;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;">After-Visit Summary</p>
+              <h1 style="color:#ffffff;font-size:24px;font-weight:700;margin:0;line-height:1.3;">Hello ${patientFirstName},</h1>
+              <p style="color:#6b8f8d;font-size:14px;margin:10px 0 0;line-height:1.5;">
+                Here is a summary of your visit with ${doctorName} at ${hospitalName}. Please read it carefully and keep it for your records.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 40px 12px;">
+              ${bodyHtml}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 40px 32px;">
+              <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;">
+                <p style="color:#92400e;font-size:13px;margin:0;line-height:1.5;">
+                  <strong>Important:</strong> This summary is for your information only. If you have an emergency, go to the nearest hospital or call your doctor immediately.
+                </p>
+              </div>
+              <p style="color:#9ca3af;font-size:11px;margin:20px 0 0;">
+                Sent via Meditir · ${hospitalName}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  await resend.emails.send({
+    from: FROM,
+    to: patientEmail,
+    subject,
+    html,
+  });
+};

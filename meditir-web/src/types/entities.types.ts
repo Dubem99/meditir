@@ -173,3 +173,25 @@ export interface EhrExtractions {
   orders: Order[];
   billingCodes: BillingCode[];
 }
+
+export type SummaryLanguage = 'ENGLISH' | 'PIDGIN' | 'YORUBA' | 'HAUSA' | 'IGBO';
+export type DeliveryChannel = 'EMAIL' | 'WHATSAPP' | 'SMS' | 'PRINT';
+
+export interface PatientSummary {
+  id: string;
+  soapNoteId: string;
+  hospitalId: string;
+  patientId: string;
+  language: SummaryLanguage;
+  content: string;
+  edited: boolean;
+  sentVia: string[];
+  sentAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SendSummaryResult {
+  summary: PatientSummary;
+  results: Record<string, { ok: boolean; detail?: string; link?: string }>;
+}

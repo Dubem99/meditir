@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { TranscriptionRoom } from '@/components/transcription/TranscriptionRoom';
 import { SOAPNoteCard } from '@/components/soap-notes/SOAPNoteCard';
 import { ExtractionsPanel } from '@/components/soap-notes/ExtractionsPanel';
+import { PatientSummaryPanel } from '@/components/soap-notes/PatientSummaryPanel';
 import { TTSPlayer } from '@/components/tts/TTSPlayer';
 import { Spinner } from '@/components/ui/Spinner';
 import { useSessionStore } from '@/store/session.store';
@@ -28,7 +29,7 @@ export default function SessionPage() {
   const [soapNote, setSOAPNote] = useState<SOAPNote | null>(null);
   const [extractions, setExtractions] = useState<EhrExtractions | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'room' | 'note' | 'ehr' | 'generating' | 'generate-failed'>('room');
+  const [view, setView] = useState<'room' | 'note' | 'ehr' | 'avs' | 'generating' | 'generate-failed'>('room');
   const [retrying, setRetrying] = useState(false);
 
   // Handover state
@@ -244,7 +245,7 @@ export default function SessionPage() {
         {session.status === 'COMPLETED' && soapNote && (
           <div className="flex items-center justify-between mb-6 print:hidden">
             <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
-              {(['room', 'note', 'ehr'] as const).map((v) => (
+              {(['room', 'note', 'ehr', 'avs'] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
@@ -252,7 +253,13 @@ export default function SessionPage() {
                     view === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  {v === 'room' ? 'Transcript' : v === 'note' ? 'Clinical Note' : 'Structured Data'}
+                  {v === 'room'
+                    ? 'Transcript'
+                    : v === 'note'
+                    ? 'Clinical Note'
+                    : v === 'ehr'
+                    ? 'Structured Data'
+                    : 'Patient Summary'}
                 </button>
               ))}
             </div>
@@ -404,6 +411,17 @@ export default function SessionPage() {
             >
               {retrying ? 'Retrying…' : 'Generate Note'}
             </button>
+          </div>
+        )}
+
+        {/* Patient summary view */}
+        {view === 'avs' && soapNote && (
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <PatientSummaryPanel
+              soapNoteId={soapNote.id}
+              sessionId={sessionId}
+              readOnly={soapNote.id.startsWith('demo-')}
+            />
           </div>
         )}
 
