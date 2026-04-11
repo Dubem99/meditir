@@ -77,11 +77,12 @@ export default function AdminPatientsPage() {
             )}
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[560px]">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                {['Patient', 'Record No.', 'Contact', 'Blood Group', 'Registered'].map((h) => (
-                  <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+                {['Patient', 'Record No.', 'Contact', 'Blood Group', 'Registered', ''].map((h, i) => (
+                  <th key={i} className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -114,10 +115,19 @@ export default function AdminPatientsPage() {
                   <td className="px-5 py-4 text-gray-500 text-xs">
                     {format(new Date(), 'MMM d, yyyy')}
                   </td>
+                  <td className="px-5 py-4 text-right">
+                    <Link
+                      href={`/admin/patients/${p.id}/edit`}
+                      className="text-xs font-medium text-primary-600 hover:text-primary-700"
+                    >
+                      Edit
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

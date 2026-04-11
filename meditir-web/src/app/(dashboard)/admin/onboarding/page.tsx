@@ -122,7 +122,12 @@ export default function OnboardingPage() {
             <Input label="Temporary Password" type="password" value={doctorForm.password} onChange={(e) => setDoctorForm(f => ({ ...f, password: e.target.value }))} required minLength={8} />
             <Input label="Specialization" value={doctorForm.specialization} onChange={(e) => setDoctorForm(f => ({ ...f, specialization: e.target.value }))} required />
             <Input label="License Number" value={doctorForm.licenseNumber} onChange={(e) => setDoctorForm(f => ({ ...f, licenseNumber: e.target.value }))} required />
-            <Input label="Phone (optional)" value={doctorForm.phone} onChange={(e) => setDoctorForm(f => ({ ...f, phone: e.target.value }))} />
+            <Input
+              label="Phone (optional)"
+              value={doctorForm.phone}
+              onChange={(e) => setDoctorForm(f => ({ ...f, phone: e.target.value }))}
+              placeholder="e.g. 08012345678 or +2348012345678"
+            />
             {error && <p className="text-sm text-red-600">{error}</p>}
             <Button type="submit" loading={loading} className="w-full">Onboard Doctor</Button>
           </form>
@@ -146,8 +151,16 @@ export default function OnboardingPage() {
             <Input label="Temporary Password" type="password" value={patientForm.password} onChange={(e) => setPatientForm(f => ({ ...f, password: e.target.value }))} required minLength={8} />
             <div className="grid grid-cols-2 gap-4">
               <Input label="Medical Record No." value={patientForm.medicalRecordNo} onChange={(e) => setPatientForm(f => ({ ...f, medicalRecordNo: e.target.value }))} />
-              <Input label="Phone" value={patientForm.phone} onChange={(e) => setPatientForm(f => ({ ...f, phone: e.target.value }))} />
+              <Input
+                label="Phone"
+                value={patientForm.phone}
+                onChange={(e) => setPatientForm(f => ({ ...f, phone: e.target.value }))}
+                placeholder="08012345678 or +2348012345678"
+              />
             </div>
+            <p className="text-xs text-gray-500 -mt-2">
+              Phone is used for WhatsApp after-visit summaries. Accepts Nigerian mobile formats only.
+            </p>
             <div className="grid grid-cols-2 gap-4">
               <Input label="Blood Group" value={patientForm.bloodGroup} onChange={(e) => setPatientForm(f => ({ ...f, bloodGroup: e.target.value }))} placeholder="e.g. A+" />
               <Input label="Genotype" value={patientForm.genotype} onChange={(e) => setPatientForm(f => ({ ...f, genotype: e.target.value }))} placeholder="e.g. AA" />

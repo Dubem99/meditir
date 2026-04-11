@@ -1,6 +1,21 @@
 import { z } from 'zod';
 import { Gender } from '../../types/enums';
 
+// Accepts Nigerian mobile formats: 08012345678, +2348012345678, 2348012345678,
+// with optional spaces, dashes, or parentheses. 10 or 13 digits after stripping.
+const nigerianPhone = z
+  .string()
+  .optional()
+  .refine(
+    (v) => {
+      if (!v || v.trim() === '') return true;
+      const digits = v.replace(/\D/g, '');
+      // Local format starts with 0 (11 digits) or international starts with 234 (13 digits)
+      return /^0\d{10}$/.test(digits) || /^234\d{10}$/.test(digits);
+    },
+    { message: 'Phone must be a valid Nigerian number (e.g. 08012345678 or +2348012345678)' }
+  );
+
 export const RegisterPatientSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
@@ -10,10 +25,10 @@ export const RegisterPatientSchema = z.object({
   gender: z.nativeEnum(Gender).optional(),
   bloodGroup: z.string().max(5).optional(),
   genotype: z.string().max(5).optional(),
-  phone: z.string().optional(),
+  phone: nigerianPhone,
   address: z.string().max(200).optional(),
   nextOfKin: z.string().max(100).optional(),
-  nextOfKinPhone: z.string().optional(),
+  nextOfKinPhone: nigerianPhone,
   medicalRecordNo: z.string().max(50).optional(),
   allergies: z.array(z.string()).optional().default([]),
   chronicConditions: z.array(z.string()).optional().default([]),
