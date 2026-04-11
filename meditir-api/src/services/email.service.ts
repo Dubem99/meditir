@@ -1,6 +1,6 @@
 import { Resend } from 'resend';
 
-const FROM = 'Meditir <onboarding@meditir.app>';
+const FROM = 'Meditir <onboarding@meditir.com>';
 
 let resendClient: Resend | null = null;
 const getResend = (): Resend | null => {
@@ -221,7 +221,7 @@ export const sendOnboardingEmail = async ({
             <td style="padding:32px 40px;">
               <p style="color:#9ca3af;font-size:12px;margin:0;line-height:1.6;">
                 Need help getting started? Reply to this email or reach us at
-                <a href="mailto:support@meditir.app" style="color:#2e9690;text-decoration:none;">support@meditir.app</a>
+                <a href="mailto:support@meditir.com" style="color:#2e9690;text-decoration:none;">support@meditir.com</a>
               </p>
               <p style="color:#d1d5db;font-size:11px;margin:16px 0 0;">
                 © ${new Date().getFullYear()} Meditir · Built for healthcare in Nigeria
