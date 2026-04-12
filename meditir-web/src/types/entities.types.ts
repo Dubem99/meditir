@@ -206,3 +206,13 @@ export interface SendSummaryResult {
   summary: PatientSummary;
   results: Record<string, { ok: boolean; detail?: string; link?: string }>;
 }
+
+export type ChatRole = 'USER' | 'ASSISTANT';
+
+export interface NoteChatMessage {
+  id: string;
+  sessionId: string;
+  role: ChatRole;
+  content: string;
+  createdAt: string;
+}

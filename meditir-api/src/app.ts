@@ -17,6 +17,7 @@ import transcriptionRoutes from './modules/transcription/transcription.routes';
 import soapNotesRoutes from './modules/soap-notes/soap-notes.routes';
 import ehrExtractionsRoutes from './modules/ehr-extractions/ehr-extractions.routes';
 import patientSummariesRoutes from './modules/patient-summaries/patient-summaries.routes';
+import noteChatRoutes from './modules/note-chat/note-chat.routes';
 import ttsRoutes from './modules/tts/tts.routes';
 import adminRoutes from './modules/admin/admin.routes';
 
@@ -76,6 +77,7 @@ export const createApp = () => {
         'soap-notes',
         'ehr-extractions',
         'patient-summaries',
+        'note-chat',
         'tts',
         'admin',
       ],
@@ -94,6 +96,7 @@ export const createApp = () => {
   app.use(`${base}/soap-notes`, soapNotesRoutes);
   app.use(`${base}/ehr-extractions`, ehrExtractionsRoutes);
   app.use(`${base}/patient-summaries`, patientSummariesRoutes);
+  app.use(`${base}/note-chat`, noteChatRoutes);
   app.use(`${base}/tts`, ttsRoutes);
   app.use(`${base}/admin`, adminRoutes);
 

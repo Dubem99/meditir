@@ -83,6 +83,11 @@ enum SummaryLanguage {
   IGBO
 }
 
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
 // ─────────────────────────────────────────────
 // MULTI-TENANT CORE
 // ─────────────────────────────────────────────
@@ -353,6 +358,22 @@ model SOAPNote {
   @@index([hospitalId])
   @@index([patientId])
   @@map("soap_notes")
+}
+
+model NoteChatMessage {
+  id         String   @id @default(uuid())
+  sessionId  String
+  hospitalId String
+  soapNoteId String?
+
+  role    ChatRole
+  content String
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+  @@index([hospitalId])
+  @@map("note_chat_messages")
 }
 
 model PatientSummary {

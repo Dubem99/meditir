@@ -7,6 +7,7 @@ import { TranscriptionRoom } from '@/components/transcription/TranscriptionRoom'
 import { SOAPNoteCard } from '@/components/soap-notes/SOAPNoteCard';
 import { ExtractionsPanel } from '@/components/soap-notes/ExtractionsPanel';
 import { PatientSummaryPanel } from '@/components/soap-notes/PatientSummaryPanel';
+import { NoteChatPanel } from '@/components/soap-notes/NoteChatPanel';
 import { TTSPlayer } from '@/components/tts/TTSPlayer';
 import { Spinner } from '@/components/ui/Spinner';
 import { useSessionStore } from '@/store/session.store';
@@ -30,7 +31,7 @@ export default function SessionPage() {
   const [extractions, setExtractions] = useState<EhrExtractions | null>(null);
   const [extractionsError, setExtractionsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'room' | 'note' | 'ehr' | 'avs' | 'generating' | 'generate-failed'>('room');
+  const [view, setView] = useState<'room' | 'note' | 'ehr' | 'avs' | 'chat' | 'generating' | 'generate-failed'>('room');
   const [retrying, setRetrying] = useState(false);
 
   // Handover state
@@ -257,7 +258,7 @@ export default function SessionPage() {
         {session.status === 'COMPLETED' && soapNote && (
           <div className="flex items-center justify-between mb-6 print:hidden">
             <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
-              {(['room', 'note', 'ehr', 'avs'] as const).map((v) => (
+              {(['room', 'note', 'ehr', 'avs', 'chat'] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
@@ -271,7 +272,9 @@ export default function SessionPage() {
                     ? 'Clinical Note'
                     : v === 'ehr'
                     ? 'Structured Data'
-                    : 'Patient Summary'}
+                    : v === 'avs'
+                    ? 'Patient Summary'
+                    : 'Chat'}
                 </button>
               ))}
             </div>
@@ -423,6 +426,16 @@ export default function SessionPage() {
             >
               {retrying ? 'Retrying…' : 'Generate Note'}
             </button>
+          </div>
+        )}
+
+        {/* Chat view */}
+        {view === 'chat' && soapNote && (
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <NoteChatPanel
+              sessionId={sessionId}
+              readOnly={soapNote.id.startsWith('demo-')}
+            />
           </div>
         )}
 
