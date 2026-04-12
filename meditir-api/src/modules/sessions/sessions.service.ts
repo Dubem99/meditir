@@ -7,7 +7,20 @@ import type { CreateSessionInput, UpdateSessionInput } from './sessions.schema';
 
 const sessionIncludes = {
   doctor: { select: { id: true, firstName: true, lastName: true, specialization: true } },
-  patient: { select: { id: true, firstName: true, lastName: true, medicalRecordNo: true } },
+  patient: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      medicalRecordNo: true,
+      dateOfBirth: true,
+      gender: true,
+      bloodGroup: true,
+      genotype: true,
+      allergies: true,
+      chronicConditions: true,
+    },
+  },
   soapNote: { select: { id: true, status: true } },
 };
 

@@ -21,17 +21,22 @@ const SYSTEM_PROMPT = `You are a clinical documentation assistant for Nigerian h
 Your task is to convert a doctor-patient consultation transcript into a structured SOAP note.
 
 SOAP Note Format:
-- Subjective: Patient's reported complaints, symptoms, history (in the patient's own words, paraphrased clinically)
-- Objective: Observable findings — vitals mentioned, physical exam results, test results referenced
-- Assessment: Clinical interpretation — working diagnosis or differential diagnoses
-- Plan: Treatment plan — medications, referrals, follow-up, lifestyle advice
+- Subjective: Patient's reported complaints, symptoms, and history (paraphrased clinically from what the patient said).
+- Objective: Observable findings — vitals, physical exam results, test results, visible signs mentioned in conversation.
+- Assessment: Clinical interpretation — working diagnosis or differential diagnoses based on the consultation.
+- Plan: Treatment plan — medications, investigations, referrals, follow-up, lifestyle advice.
 
 Rules:
-1. Only include information explicitly stated in the transcript.
-2. Use proper medical terminology.
-3. If a section has no data from the transcript, write "Not documented in session."
+1. Extract maximum value from the transcript. Even brief exchanges contain clinical signal — the chief complaint, why the patient came, how they feel, what the doctor decided.
+2. Use proper medical terminology but stay faithful to what was actually said.
+3. **Never output "Not documented" or similar placeholder text.** If a section has limited data, write a brief clinically valid statement that reflects reality. Examples:
+   - Subjective with limited data: "Patient presented today without a detailed history captured in this encounter. Chief concern referenced in session: [whatever brief detail exists]."
+   - Objective with no exam findings: "No formal physical examination findings were recorded during this encounter." OR infer from context if any vitals/observations were mentioned.
+   - Assessment with uncertainty: "Working impression based on available information: [best interpretation]. Further evaluation may be warranted."
+   - Plan with limited data: Extract any medications, advice, or follow-up mentioned. If truly nothing, write "Plan to be finalized by the treating clinician after further evaluation."
 4. When previous visit history is provided, reference it to show continuity of care where relevant.
-5. Respond ONLY with a valid JSON object — no markdown, no explanation.
+5. If the transcript is very short, still produce a coherent note using whatever clinical signal exists — never leave a section empty or placeholder.
+6. Respond ONLY with a valid JSON object — no markdown, no explanation.
 
 JSON format:
 {
@@ -90,7 +95,17 @@ export const generateSOAPNote = async (sessionId: string, hospitalId: string) =>
 
   const transcriptText = session.transcriptions.length > 0
     ? buildTranscriptText(session.transcriptions)
-    : 'No transcript was recorded during this session.';
+    : '';
+
+  // Reject truly empty sessions before calling Claude — a SOAP note from nothing
+  // is meaningless and leads to "Not documented" placeholders in every section.
+  const meaningfulText = transcriptText.replace(/\s+/g, ' ').trim();
+  if (meaningfulText.length < 20) {
+    throw new AppError(
+      'This session has no recorded transcript to generate a note from. Record a consultation or add notes manually first.',
+      400
+    );
+  }
 
   const historySection = previousNotes.length > 0
     ? `\nPrevious Visit History (last ${previousNotes.length} finalized visits):\n${previousNotes.map((n, i) => {

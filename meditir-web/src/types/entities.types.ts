@@ -87,7 +87,18 @@ export interface ConsultationSession {
   handoverNote?: string;
   originalDoctorId?: string;
   doctor: { id: string; firstName: string; lastName: string; specialization: string };
-  patient: { id: string; firstName: string; lastName: string; medicalRecordNo?: string };
+  patient: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    medicalRecordNo?: string;
+    dateOfBirth?: string | null;
+    gender?: Gender | null;
+    bloodGroup?: string | null;
+    genotype?: string | null;
+    allergies?: string[];
+    chronicConditions?: string[];
+  };
   soapNote?: { id: string; status: NoteStatus } | null;
   transcriptions?: Transcription[];
 }
