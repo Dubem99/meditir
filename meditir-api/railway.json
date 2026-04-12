@@ -7,7 +7,7 @@
   "deploy": {
     "startCommand": "echo '[startup] running prisma db push' && (npx prisma db push --accept-data-loss --skip-generate || echo '[startup] WARN: db push failed, continuing with stale schema') && echo '[startup] starting server' && node dist/server.js",
     "healthcheckPath": "/health",
-    "healthcheckTimeout": 30,
+    "healthcheckTimeout": 180,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }
