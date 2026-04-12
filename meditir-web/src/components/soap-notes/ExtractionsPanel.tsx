@@ -164,17 +164,23 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
             {extractions.problems.map((p) => (
               <div
                 key={p.id}
-                className={`group flex items-center gap-2 border rounded-full pl-3 pr-2 py-1 text-sm ${problemStatusColor[p.status]}`}
+                className={`flex items-start gap-2 border rounded-2xl px-3 py-2 text-sm w-full sm:w-auto sm:max-w-full ${problemStatusColor[p.status]}`}
               >
-                <span className="font-medium">{p.name}</span>
-                {p.icd10Code && <span className="font-mono text-xs opacity-70">{p.icd10Code}</span>}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-medium break-words">{p.name}</span>
+                    {p.icd10Code && (
+                      <span className="font-mono text-xs opacity-70 shrink-0">{p.icd10Code}</span>
+                    )}
+                  </div>
+                </div>
                 {!readOnly && (
-                  <>
+                  <div className="flex items-center gap-1 shrink-0 print:hidden">
                     <select
                       value={p.status}
                       onChange={(e) => updateProblemStatus(p, e.target.value as ProblemStatus)}
                       disabled={busyId === p.id}
-                      className="text-[10px] bg-transparent border-l border-current/20 pl-1.5 cursor-pointer outline-none print:hidden"
+                      className="text-[10px] bg-transparent border border-current/20 rounded px-1 py-0.5 cursor-pointer outline-none"
                     >
                       <option value="ACTIVE">Active</option>
                       <option value="CHRONIC">Chronic</option>
@@ -184,12 +190,12 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
                     <button
                       onClick={() => removeProblem(p.id)}
                       disabled={busyId === p.id}
-                      className="opacity-0 group-hover:opacity-100 hover:bg-white/50 rounded-full w-4 h-4 flex items-center justify-center text-xs transition-opacity print:hidden"
+                      className="hover:bg-white/50 rounded-full w-5 h-5 flex items-center justify-center text-sm leading-none transition-colors"
                       aria-label="Remove"
                     >
                       ×
                     </button>
-                  </>
+                  </div>
                 )}
               </div>
             ))}
@@ -209,25 +215,27 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
             {extractions.orders.map((o) => (
               <div
                 key={o.id}
-                className="group flex items-start gap-3 border border-gray-200 rounded-xl p-3 bg-white"
+                className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-3 border border-gray-200 rounded-xl p-3 bg-white"
               >
-                <span
-                  className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider border rounded px-1.5 py-0.5 ${orderTypeColor[o.type]}`}
-                >
-                  {o.type}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{o.name}</p>
-                  {(o.dosage || o.frequency || o.duration) && (
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {[o.dosage, o.frequency, o.duration].filter(Boolean).join(' · ')}
-                    </p>
-                  )}
-                  {o.instructions && (
-                    <p className="text-xs text-gray-400 mt-0.5 italic">{o.instructions}</p>
-                  )}
+                <div className="flex items-start gap-2 sm:gap-3 min-w-0 flex-1">
+                  <span
+                    className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider border rounded px-1.5 py-0.5 ${orderTypeColor[o.type]}`}
+                  >
+                    {o.type}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 break-words">{o.name}</p>
+                    {(o.dosage || o.frequency || o.duration) && (
+                      <p className="text-xs text-gray-500 mt-0.5 break-words">
+                        {[o.dosage, o.frequency, o.duration].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
+                    {o.instructions && (
+                      <p className="text-xs text-gray-400 mt-0.5 italic break-words">{o.instructions}</p>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
                   {!readOnly ? (
                     <select
                       value={o.status}
@@ -251,7 +259,7 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
                     <button
                       onClick={() => removeOrder(o.id)}
                       disabled={busyId === o.id}
-                      className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 text-lg leading-none transition-opacity print:hidden"
+                      className="text-gray-300 hover:text-red-500 text-lg leading-none transition-colors print:hidden"
                       aria-label="Remove"
                     >
                       ×
@@ -276,18 +284,22 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
             {extractions.billingCodes.map((c: BillingCode) => (
               <div
                 key={c.id}
-                className="group flex items-center gap-2 border border-gray-200 rounded-lg bg-gray-50 px-2.5 py-1.5"
+                className="flex items-start gap-2 border border-gray-200 rounded-xl bg-gray-50 px-3 py-2 w-full sm:w-auto sm:max-w-full"
               >
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                  {c.codeType}
-                </span>
-                <span className="font-mono text-xs font-semibold text-gray-900">{c.code}</span>
-                <span className="text-xs text-gray-600">{c.description}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 shrink-0">
+                      {c.codeType}
+                    </span>
+                    <span className="font-mono text-xs font-semibold text-gray-900 shrink-0">{c.code}</span>
+                    <span className="text-xs text-gray-600 break-words">{c.description}</span>
+                  </div>
+                </div>
                 {!readOnly && (
                   <button
                     onClick={() => removeBillingCode(c.id)}
                     disabled={busyId === c.id}
-                    className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 text-sm leading-none transition-opacity print:hidden"
+                    className="text-gray-300 hover:text-red-500 text-base leading-none transition-colors shrink-0 print:hidden"
                     aria-label="Remove"
                   >
                     ×
