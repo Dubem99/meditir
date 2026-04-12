@@ -101,7 +101,8 @@ export const createApp = () => {
   app.use(`${base}/admin`, adminRoutes);
 
   // 404 handler
-  app.use((_req, res) => {
+  app.use((req, res) => {
+    console.warn(`[404] ${req.method} ${req.originalUrl} — no matching route`);
     res.status(404).json({ status: 'error', message: 'Route not found' });
   });
 
