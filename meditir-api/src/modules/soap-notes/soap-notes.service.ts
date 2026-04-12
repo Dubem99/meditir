@@ -137,9 +137,20 @@ Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None docu
 
     const rawJson = content.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     parsed = SOAPResponseSchema.parse(JSON.parse(rawJson));
-  } catch (err) {
-    logger.error('SOAP generation failed', { error: err, sessionId });
-    throw new AppError('Failed to generate SOAP note. Please try again.', 503);
+  } catch (err: unknown) {
+    const e = err as { name?: string; message?: string; status?: number; error?: unknown; stack?: string };
+    logger.error('SOAP generation failed', {
+      sessionId,
+      errorName: e?.name ?? 'Unknown',
+      errorMessage: e?.message ?? String(err),
+      errorStatus: e?.status,
+      errorBody: e?.error ? JSON.stringify(e.error) : undefined,
+      stack: e?.stack?.split('\n').slice(0, 5).join(' | '),
+    });
+    throw new AppError(
+      `Failed to generate SOAP note: ${e?.message || 'unknown error'}`,
+      503
+    );
   }
 
   // Non-blocking drug interaction check
