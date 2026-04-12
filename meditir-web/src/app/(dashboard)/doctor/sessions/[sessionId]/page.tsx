@@ -278,7 +278,7 @@ export default function SessionPage() {
         {session.status === 'COMPLETED' && soapNote && (
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6 print:hidden">
             <div className="flex gap-1 p-1 bg-gray-100 rounded-xl overflow-x-auto -mx-1 sm:mx-0 sm:w-fit">
-              {(['room', 'note', 'ehr', 'avs', 'chat'] as const).map((v) => (
+              {(['note', 'chat', 'room', 'ehr', 'avs'] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
@@ -286,15 +286,15 @@ export default function SessionPage() {
                     view === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  {v === 'room'
-                    ? 'Transcript'
-                    : v === 'note'
+                  {v === 'note'
                     ? 'Clinical Note'
+                    : v === 'chat'
+                    ? 'Chat'
+                    : v === 'room'
+                    ? 'Transcript'
                     : v === 'ehr'
-                    ? 'Structured Data'
-                    : v === 'avs'
-                    ? 'Patient Summary'
-                    : 'Chat'}
+                    ? 'Diagnoses & Orders'
+                    : 'Patient Summary'}
                 </button>
               ))}
             </div>
