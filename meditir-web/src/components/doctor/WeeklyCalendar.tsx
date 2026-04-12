@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { addDays, addWeeks, format, isSameDay, isToday, startOfWeek } from 'date-fns';
+import { addDays, format, isSameDay, isToday, isTomorrow, startOfDay } from 'date-fns';
 import type { ConsultationSession } from '@/types/entities.types';
 
 interface Props {
@@ -37,15 +37,16 @@ const statusStyles: Record<string, { bg: string; text: string; border: string; d
 };
 
 export const WeeklyCalendar = ({ sessions }: Props) => {
-  const [weekOffset, setWeekOffset] = useState(0);
+  // Offset in days from today. 0 = start at today, -7 = previous 7 days, +7 = next 7 days.
+  const [dayOffset, setDayOffset] = useState(0);
 
   const { weekStart, days } = useMemo(() => {
-    const ws = addWeeks(startOfWeek(new Date(), { weekStartsOn: 1 }), weekOffset);
+    const ws = addDays(startOfDay(new Date()), dayOffset);
     return {
       weekStart: ws,
       days: Array.from({ length: 7 }, (_, i) => addDays(ws, i)),
     };
-  }, [weekOffset]);
+  }, [dayOffset]);
 
   const sessionsByDay = useMemo(() => {
     const map = new Map<string, ConsultationSession[]>();
@@ -66,7 +67,9 @@ export const WeeklyCalendar = ({ sessions }: Props) => {
       {/* Header */}
       <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-gray-100">
         <div className="min-w-0">
-          <h2 className="font-semibold text-gray-900">This Week</h2>
+          <h2 className="font-semibold text-gray-900">
+            {dayOffset === 0 ? 'Next 7 Days' : 'Upcoming'}
+          </h2>
           <p className="text-xs text-gray-400 mt-0.5">
             {format(weekStart, 'MMM d')} – {format(addDays(weekStart, 6), 'MMM d, yyyy')} ·{' '}
             {totalThisWeek} consultation{totalThisWeek !== 1 ? 's' : ''}
@@ -74,25 +77,25 @@ export const WeeklyCalendar = ({ sessions }: Props) => {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
-            onClick={() => setWeekOffset((o) => o - 1)}
+            onClick={() => setDayOffset((o) => o - 7)}
             className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
-            aria-label="Previous week"
+            aria-label="Previous 7 days"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
           <button
-            onClick={() => setWeekOffset(0)}
-            disabled={weekOffset === 0}
+            onClick={() => setDayOffset(0)}
+            disabled={dayOffset === 0}
             className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Today
           </button>
           <button
-            onClick={() => setWeekOffset((o) => o + 1)}
+            onClick={() => setDayOffset((o) => o + 7)}
             className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
-            aria-label="Next week"
+            aria-label="Next 7 days"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -115,8 +118,12 @@ export const WeeklyCalendar = ({ sessions }: Props) => {
             >
               {/* Day header */}
               <div className="flex md:flex-col items-center md:items-stretch justify-between md:justify-start gap-2 px-3 pt-3 pb-2 md:text-center">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-                  {format(day, 'EEE')}
+                <p
+                  className={`text-[10px] font-semibold uppercase tracking-widest ${
+                    today ? 'text-primary-600' : 'text-gray-400'
+                  }`}
+                >
+                  {today ? 'Today' : isTomorrow(day) ? 'Tomorrow' : format(day, 'EEE')}
                 </p>
                 <div
                   className={`text-lg md:text-xl font-bold md:mt-0.5 ${
@@ -132,7 +139,7 @@ export const WeeklyCalendar = ({ sessions }: Props) => {
                       {format(day, 'd')}
                     </span>
                   ) : (
-                    format(day, 'd')
+                    format(day, 'd MMM')
                   )}
                 </div>
                 <span className="md:hidden text-xs text-gray-400 ml-auto">
