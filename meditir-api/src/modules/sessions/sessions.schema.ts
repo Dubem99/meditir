@@ -3,7 +3,7 @@ import { Dialect } from '../../types/enums';
 
 export const CreateSessionSchema = z.object({
   patientId: z.string().uuid(),
-  doctorId: z.string().uuid(),
+  doctorId: z.string().uuid().optional(),
   scheduledAt: z.string().datetime(),
   dialect: z.nativeEnum(Dialect).optional().default(Dialect.NIGERIAN_ENGLISH),
   notes: z.string().max(1000).optional(),
