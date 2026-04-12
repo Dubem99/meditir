@@ -504,6 +504,28 @@ export default function SessionPage() {
                 {duration && ` · Duration: ${duration}`}
               </p>
             </div>
+
+            {/* Chat with notes CTA */}
+            <button
+              onClick={() => setView('chat')}
+              className="group w-full mb-5 flex items-center gap-3 p-4 rounded-xl border border-primary-200 bg-gradient-to-r from-primary-50 to-white hover:from-primary-100 hover:border-primary-300 transition-all text-left print:hidden"
+            >
+              <div className="w-10 h-10 rounded-xl bg-primary-100 border border-primary-200 flex items-center justify-center shrink-0 group-hover:bg-primary-200 transition-colors">
+                <svg className="h-5 w-5 text-primary-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900">Chat with this note</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Ask Claude questions about this visit, differentials, or how it compares to previous visits
+                </p>
+              </div>
+              <svg className="h-4 w-4 text-primary-400 group-hover:text-primary-600 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+
             <SOAPNoteCard
               note={soapNote}
               showActions
