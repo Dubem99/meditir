@@ -33,6 +33,8 @@ export const RegisterPatientSchema = z.object({
   allergies: z.array(z.string()).optional().default([]),
   chronicConditions: z.array(z.string()).optional().default([]),
   preferTTS: z.boolean().optional().default(false),
+  // Set to true to bypass soft duplicate warnings (e.g. shared phone numbers).
+  forceCreate: z.boolean().optional().default(false),
 });
 
 export const UpdatePatientSchema = RegisterPatientSchema.partial().omit({
