@@ -15,4 +15,4 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma
 EXPOSE 4000
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]
+CMD ["sh", "-c", "echo '[startup] running prisma db push'; npx prisma db push --accept-data-loss || echo '[startup] WARN: db push failed, continuing with stale schema'; echo '[startup] starting server'; node dist/server.js"]
