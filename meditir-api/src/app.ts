@@ -6,6 +6,11 @@ import morgan from 'morgan';
 import { config } from './config';
 import { generalLimiter } from './middleware/rateLimit.middleware';
 import { errorHandler } from './middleware/errorHandler.middleware';
+import { authenticate } from './middleware/auth.middleware';
+import { resolveTenant } from './middleware/tenant.middleware';
+import { requireRole } from './middleware/role.middleware';
+import { asyncHandler } from './utils/asyncHandler';
+import { Role } from './types/enums';
 
 // Route modules
 import authRoutes from './modules/auth/auth.routes';
@@ -93,6 +98,16 @@ export const createApp = () => {
   app.use(`${base}/patients`, patientsRoutes);
   app.use(`${base}/sessions`, sessionsRoutes);
   app.use(`${base}/transcriptions`, transcriptionRoutes);
+
+  // Direct fallback for transcription segment — bypasses the router in case
+  // the router middleware chain is failing silently for this specific route.
+  app.post(`${base}/transcriptions/segment`, authenticate, resolveTenant, requireRole(Role.DOCTOR), asyncHandler(async (req: express.Request, res: express.Response) => {
+    const { saveSegment } = await import('./modules/transcription/transcription.service');
+    const hid = (req as express.Request & { hospitalId?: string }).hospitalId;
+    if (!hid) { res.status(400).json({ status: 'error', message: 'Hospital context missing' }); return; }
+    const transcription = await saveSegment(hid, req.body);
+    res.status(201).json({ status: 'success', data: transcription });
+  }));
   app.use(`${base}/soap-notes`, soapNotesRoutes);
   app.use(`${base}/ehr-extractions`, ehrExtractionsRoutes);
   app.use(`${base}/patient-summaries`, patientSummariesRoutes);
