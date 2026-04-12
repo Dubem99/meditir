@@ -211,8 +211,42 @@ export type ChatRole = 'USER' | 'ASSISTANT';
 
 export interface NoteChatMessage {
   id: string;
-  sessionId: string;
+  sessionId?: string | null;
+  patientId?: string | null;
   role: ChatRole;
   content: string;
   createdAt: string;
+}
+
+export interface PatientTimeline {
+  patient: Patient;
+  stats: {
+    totalVisits: number;
+    completedVisits: number;
+    activeProblems: number;
+    currentMedications: number;
+    firstVisit: string | null;
+    lastVisit: string | null;
+  };
+  sessions: Array<{
+    id: string;
+    status: SessionStatus;
+    scheduledAt: string;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    doctor: { id: string; firstName: string; lastName: string; specialization: string };
+    soapNote?: { id: string; status: NoteStatus; assessment: string } | null;
+  }>;
+  notes: Array<SOAPNote & {
+    session: {
+      id: string;
+      scheduledAt: string;
+      endedAt?: string | null;
+      doctor: { firstName: string; lastName: string; specialization: string };
+    };
+  }>;
+  activeProblems: Problem[];
+  resolvedProblems: Problem[];
+  currentMedications: Order[];
+  pendingOrders: Order[];
 }

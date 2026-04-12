@@ -39,3 +39,8 @@ export const getNotes = async (req: Request, res: Response): Promise<void> => {
   const notes = await service.getPatientNotes(param(req, 'id'), hospitalId(req));
   res.json({ status: 'success', data: notes });
 };
+
+export const getTimeline = async (req: Request, res: Response): Promise<void> => {
+  const timeline = await service.getPatientTimeline(param(req, 'id'), hospitalId(req));
+  res.json({ status: 'success', data: timeline });
+};

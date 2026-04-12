@@ -146,3 +146,97 @@ export const getPatientNotes = async (patientId: string, hospitalId: string) => 
     orderBy: { createdAt: 'desc' },
   });
 };
+
+/**
+ * Aggregate timeline for the Patient History page — returns one payload
+ * with everything the UI needs: patient details, every session ordered
+ * by date, all SOAP notes with preview text, deduped active problems,
+ * and currently-ordered medications.
+ */
+export const getPatientTimeline = async (patientId: string, hospitalId: string) => {
+  const patient = await prisma.patient.findFirst({
+    where: { id: patientId, hospitalId },
+    include: { user: { select: { email: true, lastLoginAt: true } } },
+  });
+  if (!patient) throw new AppError('Patient not found', 404);
+
+  const [sessions, notes, allProblems, allOrders] = await Promise.all([
+    prisma.consultationSession.findMany({
+      where: { patientId, hospitalId },
+      include: {
+        doctor: { select: { id: true, firstName: true, lastName: true, specialization: true } },
+        soapNote: { select: { id: true, status: true, assessment: true } },
+      },
+      orderBy: { scheduledAt: 'desc' },
+    }),
+    prisma.sOAPNote.findMany({
+      where: { patientId, hospitalId },
+      include: {
+        session: {
+          select: {
+            id: true,
+            scheduledAt: true,
+            endedAt: true,
+            doctor: { select: { firstName: true, lastName: true, specialization: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.problem.findMany({
+      where: { patientId, hospitalId },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.order.findMany({
+      where: { patientId, hospitalId },
+      orderBy: { createdAt: 'desc' },
+    }),
+  ]);
+
+  // Dedupe problems by normalized name, keeping the most recent entry.
+  // Problems marked RESOLVED filter out unless there's no active version.
+  const problemMap = new Map<string, (typeof allProblems)[number]>();
+  for (const p of allProblems) {
+    const key = p.name.trim().toLowerCase();
+    const existing = problemMap.get(key);
+    if (!existing) problemMap.set(key, p);
+    else if (existing.status === 'RESOLVED' && p.status !== 'RESOLVED') {
+      problemMap.set(key, p);
+    }
+  }
+  const activeProblems = Array.from(problemMap.values()).filter((p) => p.status !== 'RESOLVED');
+  const resolvedProblems = Array.from(problemMap.values()).filter((p) => p.status === 'RESOLVED');
+
+  // Current medications = MEDICATION orders that aren't cancelled/completed,
+  // deduped by drug name keeping the most recent.
+  const medMap = new Map<string, (typeof allOrders)[number]>();
+  for (const o of allOrders) {
+    if (o.type !== 'MEDICATION') continue;
+    if (o.status === 'CANCELLED' || o.status === 'COMPLETED') continue;
+    const key = o.name.trim().toLowerCase();
+    if (!medMap.has(key)) medMap.set(key, o);
+  }
+  const currentMedications = Array.from(medMap.values());
+
+  const pendingOrders = allOrders.filter(
+    (o) => o.type !== 'MEDICATION' && (o.status === 'PENDING' || o.status === 'ORDERED')
+  );
+
+  return {
+    patient,
+    stats: {
+      totalVisits: sessions.length,
+      completedVisits: sessions.filter((s) => s.status === 'COMPLETED').length,
+      activeProblems: activeProblems.length,
+      currentMedications: currentMedications.length,
+      firstVisit: sessions.length > 0 ? sessions[sessions.length - 1].scheduledAt : null,
+      lastVisit: sessions.length > 0 ? sessions[0].scheduledAt : null,
+    },
+    sessions,
+    notes,
+    activeProblems,
+    resolvedProblems,
+    currentMedications,
+    pendingOrders,
+  };
+};

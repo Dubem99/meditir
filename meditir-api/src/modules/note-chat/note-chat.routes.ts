@@ -14,4 +14,8 @@ router.get('/session/:sessionId', requireRole(Role.DOCTOR, Role.HOSPITAL_ADMIN),
 router.post('/session/:sessionId', requireRole(Role.DOCTOR), asyncHandler(controller.send));
 router.delete('/session/:sessionId', requireRole(Role.DOCTOR), asyncHandler(controller.clear));
 
+router.get('/patient/:patientId', requireRole(Role.DOCTOR, Role.HOSPITAL_ADMIN), asyncHandler(controller.listForPatient));
+router.post('/patient/:patientId', requireRole(Role.DOCTOR), asyncHandler(controller.sendForPatient));
+router.delete('/patient/:patientId', requireRole(Role.DOCTOR), asyncHandler(controller.clearForPatient));
+
 export default router;

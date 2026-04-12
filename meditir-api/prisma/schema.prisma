@@ -362,7 +362,8 @@ model SOAPNote {
 
 model NoteChatMessage {
   id         String   @id @default(uuid())
-  sessionId  String
+  sessionId  String?
+  patientId  String?
   hospitalId String
   soapNoteId String?
 
@@ -372,6 +373,7 @@ model NoteChatMessage {
   createdAt DateTime @default(now())
 
   @@index([sessionId, createdAt])
+  @@index([patientId, createdAt])
   @@index([hospitalId])
   @@map("note_chat_messages")
 }

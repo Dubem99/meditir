@@ -203,3 +203,200 @@ export const clearMessages = async (sessionId: string, hospitalId: string) => {
 
   await prisma.noteChatMessage.deleteMany({ where: { sessionId, hospitalId } });
 };
+
+// ─────────────────────────────────────────────────────────────
+// PATIENT-LEVEL CHAT
+// Chat that spans every visit this patient has ever had
+// ─────────────────────────────────────────────────────────────
+
+const PATIENT_SYSTEM_PROMPT = `You are a clinical reasoning assistant helping a doctor review a patient's full longitudinal history at a Nigerian hospital.
+
+You have access to:
+- Patient demographics, allergies, and chronic conditions
+- Every finalized SOAP note from every visit this patient has ever had, in reverse chronological order
+- Currently active problems and medications aggregated across visits
+
+When the doctor asks you a question:
+1. Answer concisely using ONLY the context provided. If something isn't in the history, say so plainly.
+2. When comparing visits or trends, walk through specific dates and what changed.
+3. Use proper medical terminology but stay faithful to what was actually documented.
+4. For clinical reasoning (differentials, red flags, next steps), provide them as suggestions — the doctor decides.
+5. Never fabricate vitals, labs, meds, or findings.
+6. Keep responses under 250 words unless the doctor asks for more detail.
+7. Use markdown (bullets, bold) for structure where it helps.`;
+
+const buildPatientContextBlock = async (patientId: string, hospitalId: string) => {
+  const patient = await prisma.patient.findFirst({
+    where: { id: patientId, hospitalId },
+    select: {
+      firstName: true,
+      lastName: true,
+      dateOfBirth: true,
+      gender: true,
+      bloodGroup: true,
+      genotype: true,
+      allergies: true,
+      chronicConditions: true,
+    },
+  });
+  if (!patient) throw new AppError('Patient not found', 404);
+
+  // Last 10 finalized notes for this patient across all sessions
+  const notes = await prisma.sOAPNote.findMany({
+    where: { patientId, hospitalId, status: NoteStatus.FINALIZED },
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+    include: {
+      session: {
+        select: {
+          scheduledAt: true,
+          doctor: { select: { firstName: true, lastName: true, specialization: true } },
+        },
+      },
+    },
+  });
+
+  // Aggregated problems and current meds
+  const [problems, meds] = await Promise.all([
+    prisma.problem.findMany({
+      where: { patientId, hospitalId },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.order.findMany({
+      where: { patientId, hospitalId, type: 'MEDICATION' },
+      orderBy: { createdAt: 'desc' },
+    }),
+  ]);
+
+  const age = patient.dateOfBirth
+    ? Math.floor((Date.now() - new Date(patient.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
+    : null;
+
+  const demographics = [
+    `Patient: ${patient.firstName} ${patient.lastName}`,
+    age !== null ? `Age: ${age}` : null,
+    patient.gender ? `Gender: ${patient.gender}` : null,
+    patient.bloodGroup ? `Blood group: ${patient.bloodGroup}` : null,
+    patient.genotype ? `Genotype: ${patient.genotype}` : null,
+    `Allergies: ${patient.allergies.join(', ') || 'None documented'}`,
+    `Chronic conditions: ${patient.chronicConditions.join(', ') || 'None documented'}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const notesBlock = notes.length > 0
+    ? `# Visit History (last ${notes.length} finalized visits, most recent first)\n${notes
+        .map((n, i) => {
+          const date = n.session.scheduledAt.toISOString().slice(0, 10);
+          const doc = n.session.doctor;
+          return `## Visit ${i + 1} — ${date} (Dr. ${doc.firstName} ${doc.lastName}, ${doc.specialization})
+**Subjective:** ${n.subjective}
+**Assessment:** ${n.assessment}
+**Plan:** ${n.plan}`;
+        })
+        .join('\n\n')}`
+    : '# Visit History\n(No finalized visits yet for this patient.)';
+
+  const problemsBlock = problems.length > 0
+    ? `# Tracked Problems\n${problems
+        .map((p) => `- ${p.name} (${p.status}${p.icd10Code ? ', ' + p.icd10Code : ''})`)
+        .join('\n')}`
+    : '# Tracked Problems\n(None recorded.)';
+
+  const medsBlock = meds.length > 0
+    ? `# All Medication History\n${meds
+        .map(
+          (m) =>
+            `- ${m.name}${m.dosage ? ' ' + m.dosage : ''}${m.frequency ? ' ' + m.frequency : ''} (${m.status})`
+        )
+        .join('\n')}`
+    : '# All Medication History\n(None recorded.)';
+
+  return `# Patient Context\n${demographics}\n\n${notesBlock}\n\n${problemsBlock}\n\n${medsBlock}`;
+};
+
+export const sendPatientMessage = async ({
+  patientId,
+  hospitalId,
+  userMessage,
+}: {
+  patientId: string;
+  hospitalId: string;
+  userMessage: string;
+}) => {
+  const trimmed = userMessage.trim();
+  if (!trimmed) throw new AppError('Message cannot be empty', 400);
+  if (trimmed.length > 2000) throw new AppError('Message too long (max 2000 characters)', 400);
+
+  const patient = await prisma.patient.findFirst({
+    where: { id: patientId, hospitalId },
+    select: { id: true },
+  });
+  if (!patient) throw new AppError('Patient not found', 404);
+
+  const context = await buildPatientContextBlock(patientId, hospitalId);
+
+  const history = await prisma.noteChatMessage.findMany({
+    where: { patientId, sessionId: null, hospitalId },
+    orderBy: { createdAt: 'asc' },
+    take: 20,
+  });
+
+  const claudeMessages: { role: 'user' | 'assistant'; content: string }[] = history.map((m) => ({
+    role: m.role === 'USER' ? 'user' : 'assistant',
+    content: m.content,
+  }));
+  claudeMessages.push({ role: 'user', content: trimmed });
+
+  let assistantText: string;
+  try {
+    const response = await client.messages.create({
+      model: config.CLAUDE_MODEL,
+      max_tokens: 1536,
+      system: `${PATIENT_SYSTEM_PROMPT}\n\n---\n\n${context}`,
+      messages: claudeMessages,
+    });
+    const block = response.content[0];
+    if (block.type !== 'text') throw new Error('Unexpected response type from Claude');
+    assistantText = block.text.trim();
+  } catch (err) {
+    logger.error('Patient chat failed', { error: err, patientId });
+    throw new AppError('Failed to get a response. Please try again.', 503);
+  }
+
+  const [userMsg, assistantMsg] = await prisma.$transaction([
+    prisma.noteChatMessage.create({
+      data: { patientId, hospitalId, role: 'USER', content: trimmed },
+    }),
+    prisma.noteChatMessage.create({
+      data: { patientId, hospitalId, role: 'ASSISTANT', content: assistantText },
+    }),
+  ]);
+
+  return { userMessage: userMsg, assistantMessage: assistantMsg };
+};
+
+export const listPatientMessages = async (patientId: string, hospitalId: string) => {
+  const patient = await prisma.patient.findFirst({
+    where: { id: patientId, hospitalId },
+    select: { id: true },
+  });
+  if (!patient) throw new AppError('Patient not found', 404);
+
+  return prisma.noteChatMessage.findMany({
+    where: { patientId, sessionId: null, hospitalId },
+    orderBy: { createdAt: 'asc' },
+  });
+};
+
+export const clearPatientMessages = async (patientId: string, hospitalId: string) => {
+  const patient = await prisma.patient.findFirst({
+    where: { id: patientId, hospitalId },
+    select: { id: true },
+  });
+  if (!patient) throw new AppError('Patient not found', 404);
+
+  await prisma.noteChatMessage.deleteMany({
+    where: { patientId, sessionId: null, hospitalId },
+  });
+};

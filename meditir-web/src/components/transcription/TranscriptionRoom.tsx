@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useTranscription } from '@/hooks/useTranscription';
 import { useOfflineSync } from '@/hooks/useOfflineSync';
 import { useSessionStore } from '@/store/session.store';
@@ -99,9 +100,13 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
       <div className="flex items-start justify-between mb-6 gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-2xl font-bold text-gray-900 truncate">
+            <Link
+              href={`/doctor/patients/${patient.id}`}
+              className="text-2xl font-bold text-gray-900 truncate hover:text-primary-600 transition-colors"
+              title="View full patient history"
+            >
               {patient.firstName} {patient.lastName}
-            </h2>
+            </Link>
             {patient.medicalRecordNo && (
               <span className="text-xs font-mono text-gray-400 bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-full">
                 {patient.medicalRecordNo}

@@ -20,3 +20,22 @@ export const clear = async (req: Request, res: Response): Promise<void> => {
   await service.clearMessages(param(req, 'sessionId'), hospitalId(req));
   res.json({ status: 'success' });
 };
+
+export const listForPatient = async (req: Request, res: Response): Promise<void> => {
+  const messages = await service.listPatientMessages(param(req, 'patientId'), hospitalId(req));
+  res.json({ status: 'success', data: messages });
+};
+
+export const sendForPatient = async (req: Request, res: Response): Promise<void> => {
+  const result = await service.sendPatientMessage({
+    patientId: param(req, 'patientId'),
+    hospitalId: hospitalId(req),
+    userMessage: req.body.message,
+  });
+  res.status(201).json({ status: 'success', data: result });
+};
+
+export const clearForPatient = async (req: Request, res: Response): Promise<void> => {
+  await service.clearPatientMessages(param(req, 'patientId'), hospitalId(req));
+  res.json({ status: 'success' });
+};

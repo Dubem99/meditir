@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import { TranscriptionRoom } from '@/components/transcription/TranscriptionRoom';
 import { SOAPNoteCard } from '@/components/soap-notes/SOAPNoteCard';
@@ -231,6 +232,25 @@ export default function SessionPage() {
           </svg>
           Back to dashboard
         </button>
+
+        {/* Patient name header for completed sessions */}
+        {session.status === 'COMPLETED' && (
+          <div className="mb-3 print:hidden">
+            <Link
+              href={`/doctor/patients/${session.patient.id}`}
+              className="inline-flex items-center gap-2 text-lg font-bold text-gray-900 hover:text-primary-600 transition-colors"
+              title="View full patient history"
+            >
+              {session.patient.firstName} {session.patient.lastName}
+              <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+            {session.patient.medicalRecordNo && (
+              <span className="ml-2 text-xs font-mono text-gray-400">{session.patient.medicalRecordNo}</span>
+            )}
+          </div>
+        )}
 
         {/* Session meta */}
         {session.status === 'COMPLETED' && (

@@ -18,5 +18,6 @@ router.get('/:id', requireRole(Role.HOSPITAL_ADMIN, Role.DOCTOR, Role.PATIENT), 
 router.patch('/:id', requireRole(Role.HOSPITAL_ADMIN, Role.DOCTOR, Role.PATIENT), validate(UpdatePatientSchema), asyncHandler(controller.update));
 router.get('/:id/sessions', requireRole(Role.HOSPITAL_ADMIN, Role.DOCTOR, Role.PATIENT), asyncHandler(controller.getSessions));
 router.get('/:id/notes', requireRole(Role.HOSPITAL_ADMIN, Role.DOCTOR, Role.PATIENT), asyncHandler(controller.getNotes));
+router.get('/:id/timeline', requireRole(Role.HOSPITAL_ADMIN, Role.DOCTOR), asyncHandler(controller.getTimeline));
 
 export default router;
