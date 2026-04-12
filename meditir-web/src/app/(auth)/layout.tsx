@@ -1,3 +1,5 @@
+import { Logo } from '@/components/ui/Logo';
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[#030c0b] relative overflow-hidden flex">
@@ -25,15 +27,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <div className="hidden lg:flex lg:flex-1 flex-col justify-between px-14 xl:px-20 py-12 relative z-10 max-w-3xl">
 
         {/* Logo */}
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg border border-[#2e9690]/40 bg-[#2e9690]/10 flex items-center justify-center">
-            <svg className="h-4 w-4 text-[#4db0a8]" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 15c1.66 0 3-1.34 3-3V6c0-1.66-1.34-3-3-3S9 4.34 9 6v6c0 1.66 1.34 3 3 3z" />
-              <path d="M17 12c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-2.08c3.39-.49 6-3.39 6-6.92h-2z" />
-            </svg>
-          </div>
-          <span className="font-bold text-white text-lg tracking-tight">Meditir</span>
-        </div>
+        <Logo size="md" wordmarkColor="light" />
 
         {/* Main hero */}
         <div className="max-w-lg">
@@ -105,14 +99,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <div className="flex-1 flex items-center justify-center px-6 py-12 relative z-10 lg:max-w-[480px] xl:max-w-[520px]">
         <div className="w-full max-w-sm">
           {/* Mobile logo */}
-          <div className="flex items-center gap-2.5 mb-10 lg:hidden">
-            <div className="w-7 h-7 rounded-lg border border-[#2e9690]/40 bg-[#2e9690]/10 flex items-center justify-center">
-              <svg className="h-3.5 w-3.5 text-[#4db0a8]" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 15c1.66 0 3-1.34 3-3V6c0-1.66-1.34-3-3-3S9 4.34 9 6v6c0 1.66 1.34 3 3 3z" />
-                <path d="M17 12c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-2.08c3.39-.49 6-3.39 6-6.92h-2z" />
-              </svg>
-            </div>
-            <span className="font-bold text-white text-base tracking-tight">Meditir</span>
+          <div className="mb-10 lg:hidden">
+            <Logo size="sm" wordmarkColor="light" />
           </div>
           {children}
         </div>

@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { clsx } from 'clsx';
 import { useAuthStore } from '@/store/auth.store';
 import { api } from '@/lib/api';
+import { Logo } from '@/components/ui/Logo';
 import type { Role } from '@/types/entities.types';
 
 interface NavItem {
@@ -107,18 +108,6 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
 ];
-
-const Logo = () => (
-  <div className="flex items-center gap-2.5">
-    <div className="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
-      <svg className="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M12 15c1.66 0 3-1.34 3-3V6c0-1.66-1.34-3-3-3S9 4.34 9 6v6c0 1.66 1.34 3 3 3z" />
-        <path d="M17 12c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-2.08c3.39-.49 6-3.39 6-6.92h-2z" />
-      </svg>
-    </div>
-    <span className="font-bold text-gray-900">Meditir</span>
-  </div>
-);
 
 export const Sidebar = () => {
   const pathname = usePathname();
