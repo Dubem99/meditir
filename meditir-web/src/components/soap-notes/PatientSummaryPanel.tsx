@@ -64,6 +64,7 @@ export const PatientSummaryPanel = ({ soapNoteId, sessionId, readOnly }: Props) 
   const [draft, setDraft] = useState('');
   const [language, setLanguage] = useState<SummaryLanguage>('ENGLISH');
   const [toast, setToast] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,7 +76,17 @@ export const PatientSummaryPanel = ({ soapNoteId, sessionId, readOnly }: Props) 
         setSummaries(data);
         if (data.length > 0) setActiveId(data[0].id);
       })
-      .catch(() => {})
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const e = err as { response?: { status?: number; data?: { message?: string } }; message?: string };
+        const status = e?.response?.status;
+        const msg = e?.response?.data?.message || e?.message || 'Unknown error';
+        setLoadError(
+          status === 404
+            ? 'Patient summary endpoint not found — the server may still be deploying. Please try again in a minute.'
+            : `Failed to load summaries (${status ?? 'network'}): ${msg}`
+        );
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -91,14 +102,23 @@ export const PatientSummaryPanel = ({ soapNoteId, sessionId, readOnly }: Props) 
 
   const generate = async () => {
     setGenerating(true);
+    setLoadError(null);
     try {
       const res = await api.post('/patient-summaries/generate', { soapNoteId, language });
       const created: PatientSummary = res.data.data;
       setSummaries((prev) => [created, ...prev]);
       setActiveId(created.id);
       setEditMode(false);
-    } catch {
-      flashToast('Failed to generate summary. Please try again.');
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number; data?: { message?: string } }; message?: string };
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.message || e?.message || 'Unknown error';
+      const detail =
+        status === 404
+          ? 'Patient summary endpoint not found — the server may still be deploying.'
+          : `Generate failed (${status ?? 'network'}): ${msg}`;
+      setLoadError(detail);
+      flashToast(detail);
     } finally {
       setGenerating(false);
     }
@@ -165,6 +185,12 @@ export const PatientSummaryPanel = ({ soapNoteId, sessionId, readOnly }: Props) 
 
   return (
     <div className="space-y-5">
+      {loadError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-sm font-semibold text-red-800 mb-1">Something went wrong</p>
+          <p className="text-xs text-red-700">{loadError}</p>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="font-semibold text-gray-900">Patient After-Visit Summary</h3>

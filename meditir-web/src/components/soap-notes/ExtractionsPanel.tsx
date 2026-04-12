@@ -43,13 +43,25 @@ const orderStatusColor: Record<OrderStatus, string> = {
 export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }: Props) => {
   const [regenerating, setRegenerating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const describeError = (err: unknown, action: string): string => {
+    const e = err as { response?: { status?: number; data?: { message?: string } }; message?: string };
+    const status = e?.response?.status;
+    const msg = e?.response?.data?.message || e?.message || 'Unknown error';
+    if (status === 404) return `${action} — endpoint not found. The server may still be deploying.`;
+    return `${action} failed (${status ?? 'network'}): ${msg}`;
+  };
 
   const regenerate = async () => {
     setRegenerating(true);
+    setActionError(null);
     try {
       await api.post(`/ehr-extractions/session/${sessionId}/regenerate`);
       const res = await api.get(`/ehr-extractions/session/${sessionId}`);
       onChange(res.data.data);
+    } catch (err) {
+      setActionError(describeError(err, 'Regenerate extractions'));
     } finally {
       setRegenerating(false);
     }
@@ -116,6 +128,12 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-sm font-semibold text-red-800 mb-1">Something went wrong</p>
+          <p className="text-xs text-red-700">{actionError}</p>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold text-gray-900">Structured Data</h3>

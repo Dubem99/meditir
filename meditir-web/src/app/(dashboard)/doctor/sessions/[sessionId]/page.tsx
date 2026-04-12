@@ -28,6 +28,7 @@ export default function SessionPage() {
   const [session, setSession] = useState<ConsultationSession | null>(null);
   const [soapNote, setSOAPNote] = useState<SOAPNote | null>(null);
   const [extractions, setExtractions] = useState<EhrExtractions | null>(null);
+  const [extractionsError, setExtractionsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'room' | 'note' | 'ehr' | 'avs' | 'generating' | 'generate-failed'>('room');
   const [retrying, setRetrying] = useState(false);
@@ -82,16 +83,27 @@ export default function SessionPage() {
   useEffect(() => {
     if (!soapNote?.id || soapNote.id.startsWith('demo-')) {
       setExtractions(null);
+      setExtractionsError(null);
       return;
     }
     let cancelled = false;
+    setExtractionsError(null);
     api
       .get(`/ehr-extractions/session/${sessionId}`)
       .then((res) => {
         if (!cancelled) setExtractions(res.data.data);
       })
-      .catch(() => {
-        if (!cancelled) setExtractions({ soapNoteId: soapNote.id, problems: [], orders: [], billingCodes: [] });
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const e = err as { response?: { status?: number; data?: { message?: string } }; message?: string };
+        const status = e?.response?.status;
+        const msg = e?.response?.data?.message || e?.message || 'Unknown error';
+        setExtractionsError(
+          status === 404
+            ? 'Structured data endpoint not found — the server may still be deploying. Please try again in a minute.'
+            : `Failed to load structured data (${status ?? 'network'}): ${msg}`
+        );
+        setExtractions({ soapNoteId: soapNote.id, problems: [], orders: [], billingCodes: [] });
       });
     return () => {
       cancelled = true;
@@ -428,6 +440,12 @@ export default function SessionPage() {
         {/* Structured data view */}
         {view === 'ehr' && soapNote && (
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            {extractionsError && (
+              <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-4">
+                <p className="text-sm font-semibold text-red-800 mb-1">Could not load structured data</p>
+                <p className="text-xs text-red-700">{extractionsError}</p>
+              </div>
+            )}
             {extractions ? (
               <ExtractionsPanel
                 sessionId={sessionId}

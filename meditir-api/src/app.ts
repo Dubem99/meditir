@@ -61,9 +61,26 @@ export const createApp = () => {
 
   app.use(generalLimiter);
 
-  // Health check
+  // Health check — also exposes which routes are mounted so we can verify deploys
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      routes: [
+        'auth',
+        'hospitals',
+        'doctors',
+        'patients',
+        'sessions',
+        'transcriptions',
+        'soap-notes',
+        'ehr-extractions',
+        'patient-summaries',
+        'tts',
+        'admin',
+      ],
+      commit: process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown',
+    });
   });
 
   // API routes
