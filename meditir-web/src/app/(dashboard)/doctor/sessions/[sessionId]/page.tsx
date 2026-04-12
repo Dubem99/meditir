@@ -235,20 +235,27 @@ export default function SessionPage() {
 
         {/* Patient name header for completed sessions */}
         {session.status === 'COMPLETED' && (
-          <div className="mb-3 print:hidden">
+          <div className="mb-4 print:hidden flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-lg font-bold text-gray-900">
+                {session.patient.firstName} {session.patient.lastName}
+              </p>
+              {session.patient.medicalRecordNo && (
+                <p className="text-xs font-mono text-gray-400 mt-0.5">{session.patient.medicalRecordNo}</p>
+              )}
+            </div>
             <Link
               href={`/doctor/patients/${session.patient.id}`}
-              className="inline-flex items-center gap-2 text-lg font-bold text-gray-900 hover:text-primary-600 transition-colors"
-              title="View full patient history"
+              className="flex items-center gap-2 bg-white border border-gray-200 hover:border-primary-300 hover:bg-primary-50 text-gray-700 hover:text-primary-700 px-3 py-2 rounded-xl text-xs font-medium transition-all shrink-0"
             >
-              {session.patient.firstName} {session.patient.lastName}
-              <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              View full patient history
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             </Link>
-            {session.patient.medicalRecordNo && (
-              <span className="ml-2 text-xs font-mono text-gray-400">{session.patient.medicalRecordNo}</span>
-            )}
           </div>
         )}
 
