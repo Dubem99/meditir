@@ -42,13 +42,23 @@ export const NewConsultationModal = ({ onClose }: Props) => {
     window.location.href = `/doctor/sessions/${demoSessionId}`;
   };
 
+  const [sessionError, setSessionError] = useState('');
+
   const startSessionFor = async (patientId: string) => {
-    const res = await api.post('/sessions', {
-      patientId,
-      dialect: 'NIGERIAN_ENGLISH',
-      scheduledAt: new Date().toISOString(),
-    });
-    router.push(`/doctor/sessions/${res.data.data.id}`);
+    setSessionError('');
+    try {
+      const res = await api.post('/sessions', {
+        patientId,
+        dialect: 'NIGERIAN_ENGLISH',
+        scheduledAt: new Date().toISOString(),
+      });
+      router.push(`/doctor/sessions/${res.data.data.id}`);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      const msg = e.response?.data?.message || 'Failed to create session';
+      setSessionError(msg);
+      throw err;
+    }
   };
 
   return (
@@ -72,6 +82,12 @@ export const NewConsultationModal = ({ onClose }: Props) => {
             </svg>
           </button>
         </div>
+
+        {sessionError && (
+          <div className="mx-6 mt-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            <p className="text-sm text-red-600">{sessionError}</p>
+          </div>
+        )}
 
         {mode === 'search' ? (
           <SearchView
@@ -98,7 +114,7 @@ export const NewConsultationModal = ({ onClose }: Props) => {
 // ──────────────────────────────────────────────────────────
 
 interface SearchViewProps {
-  onSelect: (patient: Patient) => void;
+  onSelect: (patient: Patient) => Promise<void>;
   onNewPatient: () => void;
   onDemoStart: (firstName: string, lastName: string) => void;
   isDemo: boolean;
@@ -148,7 +164,7 @@ const SearchView = ({ onSelect, onNewPatient, onDemoStart, isDemo }: SearchViewP
     setStartingForId(patient.id);
     setError('');
     try {
-      await Promise.resolve(onSelect(patient));
+      await onSelect(patient);
     } catch (err: unknown) {
       const e2 = err as { response?: { data?: { message?: string } } };
       setError(e2.response?.data?.message || 'Failed to start consultation');
@@ -278,7 +294,7 @@ const SearchView = ({ onSelect, onNewPatient, onDemoStart, isDemo }: SearchViewP
 
 interface RegisterViewProps {
   onBack: () => void;
-  onRegistered: (patient: Patient) => void;
+  onRegistered: (patient: Patient) => Promise<void>;
   isDemo: boolean;
   onDemoStart: (firstName: string, lastName: string) => void;
 }
@@ -321,11 +337,11 @@ const RegisterView = ({ onBack, onRegistered, isDemo, onDemoStart }: RegisterVie
 
       const res = await api.post('/patients', payload);
       const patient: Patient = res.data.data;
-      onRegistered(patient);
+      await onRegistered(patient);
     } catch (err: unknown) {
       const e2 = err as { response?: { status?: number; data?: { message?: string; meta?: { duplicatePatient?: { id: string; firstName: string; lastName: string } } } } };
       const status = e2.response?.status;
-      const msg = e2.response?.data?.message || 'Failed to register patient';
+      const msg = e2.response?.data?.message || 'Failed to register patient or start session';
       const dup = e2.response?.data?.meta?.duplicatePatient;
       if (status === 409 && dup) {
         setError(
