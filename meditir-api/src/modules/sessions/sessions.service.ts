@@ -3,6 +3,8 @@ import { prisma } from '../../config/database';
 import { AppError } from '../../utils/AppError';
 import { SessionStatus } from '../../types/enums';
 import { getPaginationParams, paginate } from '../../utils/pagination';
+import { generateSOAPNote } from '../soap-notes/soap-notes.service';
+import { logger } from '../../utils/logger';
 import type { CreateSessionInput, UpdateSessionInput } from './sessions.schema';
 
 const sessionIncludes = {
@@ -139,11 +141,18 @@ export const endSession = async (id: string, hospitalId: string, doctorUserId: s
     throw new AppError('Only the assigned doctor can end this session', 403);
   }
 
-  return prisma.consultationSession.update({
+  const updated = await prisma.consultationSession.update({
     where: { id },
     data: { status: SessionStatus.COMPLETED, endedAt: new Date() },
     include: sessionIncludes,
   });
+
+  // Auto-generate SOAP note in background — the frontend polls for it
+  generateSOAPNote(id, hospitalId).catch((err) =>
+    logger.error('Auto SOAP generation failed (non-fatal)', { error: err, sessionId: id })
+  );
+
+  return updated;
 };
 
 export const cancelSession = async (id: string, hospitalId: string) => {
