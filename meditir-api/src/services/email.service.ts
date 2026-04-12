@@ -20,6 +20,7 @@ export const sendOnboardingEmail = async ({
   hospitalName: string;
   hospitalSlug: string;
 }) => {
+  console.log(`[email] sendOnboardingEmail called for ${adminEmail} (${hospitalName})`);
   const resend = getResend();
   if (!resend) {
     console.warn('[email] RESEND_API_KEY not set — skipping onboarding email');
@@ -236,12 +237,17 @@ export const sendOnboardingEmail = async ({
 </body>
 </html>`;
 
-  await resend.emails.send({
+  const { data: sendData, error: sendError } = await resend.emails.send({
     from: FROM,
     to: adminEmail,
     subject: `Welcome to Meditir — ${hospitalName} is ready`,
     html,
   });
+  if (sendError) {
+    console.error('[email] Resend rejected onboarding email:', JSON.stringify(sendError));
+    throw new Error(`Resend error: ${sendError.name || 'unknown'} — ${sendError.message || JSON.stringify(sendError)}`);
+  }
+  console.log(`[email] Onboarding email sent to ${adminEmail}, id=${sendData?.id}`);
 };
 
 // Minimal markdown → HTML for AVS content (H2 headings, bullets, bold, line breaks).
@@ -364,10 +370,16 @@ export const sendPatientSummaryEmail = async ({
 </body>
 </html>`;
 
-  await resend.emails.send({
+  console.log(`[email] sendPatientSummaryEmail called for ${patientEmail}`);
+  const { data: sendData, error: sendError } = await resend.emails.send({
     from: FROM,
     to: patientEmail,
     subject,
     html,
   });
+  if (sendError) {
+    console.error('[email] Resend rejected patient summary email:', JSON.stringify(sendError));
+    throw new Error(`Resend error: ${sendError.name || 'unknown'} — ${sendError.message || JSON.stringify(sendError)}`);
+  }
+  console.log(`[email] Patient summary email sent to ${patientEmail}, id=${sendData?.id}`);
 };
