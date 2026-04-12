@@ -218,6 +218,36 @@ export interface NoteChatMessage {
   createdAt: string;
 }
 
+export interface Colleague {
+  id: string;
+  email: string;
+  role: Role;
+  firstName: string;
+  lastName: string;
+  specialization?: string | null;
+  avatarUrl?: string | null;
+}
+
+export interface DirectMessage {
+  id: string;
+  conversationId: string;
+  fromUserId: string;
+  toUserId: string;
+  content: string;
+  attachedPatientId?: string | null;
+  attachedSessionId?: string | null;
+  readAt?: string | null;
+  createdAt: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  lastMessageAt: string;
+  otherUser: Colleague;
+  lastMessage: DirectMessage | null;
+  unreadCount: number;
+}
+
 export interface PatientTimeline {
   patient: Patient;
   stats: {

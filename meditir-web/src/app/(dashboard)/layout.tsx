@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { OfflineBanner } from '@/components/shared/OfflineBanner';
 import { useAuthStore } from '@/store/auth.store';
 import { setAccessToken } from '@/lib/api';
+import { usePresence } from '@/hooks/usePresence';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -26,6 +27,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       setAccessToken(accessToken);
     }
   }, [ready, user, accessToken, router]);
+
+  usePresence();
 
   if (!ready || !user) return null;
 

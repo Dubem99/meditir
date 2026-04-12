@@ -89,6 +89,53 @@ enum ChatRole {
 }
 
 // ─────────────────────────────────────────────
+// DOCTOR-TO-DOCTOR MESSAGING
+// ─────────────────────────────────────────────
+
+model Conversation {
+  id         String @id @default(uuid())
+  hospitalId String
+  // Canonical form: userAId < userBId alphabetically, enforced in service layer.
+  userAId    String
+  userBId    String
+
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  messages DirectMessage[]
+
+  @@unique([hospitalId, userAId, userBId])
+  @@index([hospitalId])
+  @@index([userAId])
+  @@index([userBId])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model DirectMessage {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  hospitalId     String
+
+  fromUserId String
+  toUserId   String
+  content    String
+
+  // Optional context attachment: link a patient or session to the message
+  attachedPatientId String?
+  attachedSessionId String?
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([toUserId, readAt])
+  @@index([hospitalId])
+  @@map("direct_messages")
+}
+
+// ─────────────────────────────────────────────
 // MULTI-TENANT CORE
 // ─────────────────────────────────────────────
 
