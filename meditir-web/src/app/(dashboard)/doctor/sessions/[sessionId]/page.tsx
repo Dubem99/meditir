@@ -276,13 +276,13 @@ export default function SessionPage() {
 
         {/* Tab switcher */}
         {session.status === 'COMPLETED' && soapNote && (
-          <div className="flex items-center justify-between mb-6 print:hidden">
-            <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6 print:hidden">
+            <div className="flex gap-1 p-1 bg-gray-100 rounded-xl overflow-x-auto -mx-1 sm:mx-0 sm:w-fit">
               {(['room', 'note', 'ehr', 'avs', 'chat'] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  className={`shrink-0 px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${
                     view === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
@@ -299,18 +299,15 @@ export default function SessionPage() {
               ))}
             </div>
             {view === 'note' && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleExportPDF}
-                  className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  Export PDF
-                </button>
-                {session.status !== 'COMPLETED' || !soapNote?.doctorSignedAt ? null : null}
-              </div>
+              <button
+                onClick={handleExportPDF}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export PDF
+              </button>
             )}
           </div>
         )}

@@ -97,12 +97,12 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
   return (
     <div className="flex flex-col h-full min-h-[calc(100vh-8rem)]">
       {/* Top bar */}
-      <div className="flex items-start justify-between mb-6 gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-6 gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3 flex-wrap">
             <Link
               href={`/doctor/patients/${patient.id}`}
-              className="text-2xl font-bold text-gray-900 truncate hover:text-primary-600 transition-colors"
+              className="text-xl sm:text-2xl font-bold text-gray-900 truncate hover:text-primary-600 transition-colors"
               title="View full patient history"
             >
               {patient.firstName} {patient.lastName}
@@ -135,17 +135,17 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 sm:shrink-0">
           <button
             onClick={() => setShowDialect(!showDialect)}
-            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-2 rounded-lg transition-colors"
+            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-2 rounded-lg transition-colors shrink-0"
           >
             Dialect
           </button>
           <button
             onClick={handleEnd}
             disabled={isEndingSession}
-            className="bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white px-5 py-2 rounded-xl text-sm font-medium transition-colors shadow-sm"
+            className="flex-1 sm:flex-none bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white px-4 sm:px-5 py-2 rounded-xl text-sm font-medium transition-colors shadow-sm"
           >
             {isEndingSession ? 'Ending…' : 'End & Generate Note'}
           </button>

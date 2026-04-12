@@ -153,7 +153,7 @@ export const PatientChatPanel = ({ patientId }: Props) => {
   }
 
   return (
-    <div className="flex flex-col h-[520px]">
+    <div className="flex flex-col h-[500px] sm:h-[520px]">
       <div className="flex items-center justify-between pb-3 border-b border-gray-100 mb-4">
         <div>
           <h3 className="font-semibold text-gray-900">Chat about this patient</h3>

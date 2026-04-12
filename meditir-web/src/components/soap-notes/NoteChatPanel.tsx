@@ -162,7 +162,7 @@ export const NoteChatPanel = ({ sessionId, readOnly }: Props) => {
   }
 
   return (
-    <div className="flex flex-col h-[600px]">
+    <div className="flex flex-col h-[500px] sm:h-[600px]">
       {/* Header */}
       <div className="flex items-center justify-between pb-3 border-b border-gray-100 mb-4">
         <div>

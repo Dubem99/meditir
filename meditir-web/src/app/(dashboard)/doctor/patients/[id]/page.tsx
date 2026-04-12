@@ -101,15 +101,15 @@ export default function PatientHistoryPage() {
       </button>
 
       {/* Header card */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-6">
+      <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-4 min-w-0">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-100 to-primary-50 border border-primary-200 flex items-center justify-center text-primary-700 font-bold text-xl shrink-0">
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-primary-100 to-primary-50 border border-primary-200 flex items-center justify-center text-primary-700 font-bold text-lg sm:text-xl shrink-0">
               {patient.firstName[0]}
               {patient.lastName[0]}
             </div>
             <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-gray-900 truncate">
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
                 {patient.firstName} {patient.lastName}
               </h1>
               <div className="flex items-center gap-3 mt-1 flex-wrap text-sm text-gray-500">
@@ -216,12 +216,12 @@ export default function PatientHistoryPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
+      <div className="flex gap-1 p-1 bg-gray-100 rounded-xl overflow-x-auto -mx-1 sm:mx-0 sm:w-fit">
         {(['timeline', 'problems', 'meds', 'chat'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+            className={`shrink-0 px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${
               tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -230,7 +230,7 @@ export default function PatientHistoryPage() {
               : t === 'problems'
               ? `Problems (${activeProblems.length})`
               : t === 'meds'
-              ? `Medications (${currentMedications.length})`
+              ? `Meds (${currentMedications.length})`
               : 'Chat'}
           </button>
         ))}
