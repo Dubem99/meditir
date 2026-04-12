@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { Spinner } from '@/components/ui/Spinner';
 import { format } from 'date-fns';
+import { ScheduleConsultationModal } from '@/components/admin/ScheduleConsultationModal';
 import type { ConsultationSession } from '@/types/entities.types';
 
 const statusStyle: Record<string, { label: string; color: string }> = {
@@ -19,8 +20,9 @@ export default function AdminSessionsPage() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [filter, setFilter] = useState<string>('');
+  const [showSchedule, setShowSchedule] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
     const qs = filter ? `?status=${filter}&limit=50` : '?limit=50';
     api.get(`/sessions${qs}`)
@@ -31,17 +33,35 @@ export default function AdminSessionsPage() {
       .finally(() => setLoading(false));
   }, [filter]);
 
+  useEffect(() => { load(); }, [load]);
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">All Sessions</h1>
           <p className="text-sm text-gray-500 mt-0.5">{total} total</p>
         </div>
+        <button
+          onClick={() => setShowSchedule(true)}
+          className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors shadow-sm"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          Schedule Consultation
+        </button>
       </div>
 
+      {showSchedule && (
+        <ScheduleConsultationModal
+          onClose={() => setShowSchedule(false)}
+          onScheduled={() => load()}
+        />
+      )}
+
       {/* Filters */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {[
           { value: '', label: 'All' },
           { value: 'IN_PROGRESS', label: 'In Progress' },
@@ -71,7 +91,8 @@ export default function AdminSessionsPage() {
             <p className="text-gray-500 text-sm">No sessions found.</p>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[600px]">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
                 {['Patient', 'Doctor', 'Date & Time', 'Status', 'Note'].map((h) => (
@@ -120,6 +141,7 @@ export default function AdminSessionsPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

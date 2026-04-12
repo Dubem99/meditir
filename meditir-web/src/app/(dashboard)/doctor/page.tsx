@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { NewConsultationModal } from '@/components/transcription/NewConsultationModal';
+import { WeeklyCalendar } from '@/components/doctor/WeeklyCalendar';
 import { Spinner } from '@/components/ui/Spinner';
 import type { ConsultationSession } from '@/types/entities.types';
 import { format, isToday, isYesterday } from 'date-fns';
@@ -30,7 +31,8 @@ export default function DoctorDashboard() {
   const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
-    api.get('/sessions?limit=20').then((r) => {
+    // Fetch enough sessions to populate the weekly calendar including adjacent weeks
+    api.get('/sessions?limit=200').then((r) => {
       setSessions(r.data.data || []);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
@@ -39,7 +41,7 @@ export default function DoctorDashboard() {
   const today = sessions.filter((s) => isToday(new Date(s.scheduledAt))).length;
 
   return (
-    <div className="max-w-3xl mx-auto flex flex-col gap-8">
+    <div className="max-w-6xl mx-auto flex flex-col gap-8">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -77,6 +79,9 @@ export default function DoctorDashboard() {
           </div>
         ))}
       </div>
+
+      {/* Weekly calendar */}
+      {!loading && <WeeklyCalendar sessions={sessions} />}
 
       {/* Recent consultations */}
       <div>
