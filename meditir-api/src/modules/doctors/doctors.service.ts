@@ -3,6 +3,7 @@ import { hashPassword } from '../../utils/bcrypt';
 import { AppError } from '../../utils/AppError';
 import { Role } from '../../types/enums';
 import { getPaginationParams, paginate } from '../../utils/pagination';
+import { sendDoctorOnboardingEmail } from '../../services/email.service';
 import type { OnboardDoctorInput, UpdateDoctorInput, UpdateScheduleInput } from './doctors.schema';
 
 export const onboardDoctor = async (hospitalId: string, data: OnboardDoctorInput) => {
@@ -14,9 +15,14 @@ export const onboardDoctor = async (hospitalId: string, data: OnboardDoctorInput
   });
   if (existingLicense) throw new AppError('License number already registered', 409);
 
+  const hospital = await prisma.hospital.findUnique({
+    where: { id: hospitalId },
+    select: { name: true },
+  });
+
   const passwordHash = await hashPassword(data.password);
 
-  return prisma.$transaction(async (tx) => {
+  const doctor = await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({
       data: {
         email: data.email,
@@ -26,7 +32,7 @@ export const onboardDoctor = async (hospitalId: string, data: OnboardDoctorInput
       },
     });
 
-    const doctor = await tx.doctor.create({
+    return tx.doctor.create({
       data: {
         userId: user.id,
         hospitalId,
@@ -41,9 +47,20 @@ export const onboardDoctor = async (hospitalId: string, data: OnboardDoctorInput
       },
       include: { user: { select: { email: true, role: true } } },
     });
-
-    return doctor;
   });
+
+  // Fire-and-forget welcome email — includes temporary password so the new doctor
+  // can log in immediately. Failures are logged but don't block the response.
+  sendDoctorOnboardingEmail({
+    doctorEmail: data.email,
+    doctorFirstName: data.firstName,
+    doctorLastName: data.lastName,
+    specialization: data.specialization,
+    hospitalName: hospital?.name ?? 'your hospital',
+    temporaryPassword: data.password,
+  }).catch((err) => console.error('[email] Failed to send doctor onboarding email:', err));
+
+  return doctor;
 };
 
 export const listDoctors = async (

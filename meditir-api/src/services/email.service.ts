@@ -250,6 +250,223 @@ export const sendOnboardingEmail = async ({
   console.log(`[email] Onboarding email sent to ${adminEmail}, id=${sendData?.id}`);
 };
 
+// ─────────────────────────────────────────────────────────────
+// DOCTOR ONBOARDING EMAIL
+// Sent when a hospital admin adds a new doctor to their hospital.
+// ─────────────────────────────────────────────────────────────
+
+export const sendDoctorOnboardingEmail = async ({
+  doctorEmail,
+  doctorFirstName,
+  doctorLastName,
+  specialization,
+  hospitalName,
+  temporaryPassword,
+}: {
+  doctorEmail: string;
+  doctorFirstName: string;
+  doctorLastName: string;
+  specialization: string;
+  hospitalName: string;
+  temporaryPassword?: string;
+}) => {
+  console.log(`[email] sendDoctorOnboardingEmail called for ${doctorEmail} (${hospitalName})`);
+  const resend = getResend();
+  if (!resend) {
+    console.warn('[email] RESEND_API_KEY not set — skipping doctor onboarding email');
+    return;
+  }
+
+  const loginUrl = `${process.env.APP_URL || 'https://meditir.vercel.app'}/login`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome to Meditir</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Inter,system-ui,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.06);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:#030c0b;padding:36px 40px;">
+              <p style="color:#4db0a8;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;">You've been added to Meditir</p>
+              <h1 style="color:#ffffff;font-size:26px;font-weight:700;margin:0;line-height:1.3;">
+                Welcome, Dr. ${doctorFirstName} ${doctorLastName}
+              </h1>
+              <p style="color:#6b8f8d;font-size:15px;margin:12px 0 0;line-height:1.6;">
+                ${hospitalName} has added you as a doctor on Meditir — the AI clinical documentation platform for Nigerian hospitals. Your account is ready to use.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Login CTA -->
+          <tr>
+            <td style="padding:32px 40px 0;">
+              <a href="${loginUrl}" style="display:inline-block;background:#237874;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 28px;border-radius:12px;letter-spacing:0.2px;">
+                Sign in to your dashboard →
+              </a>
+              <p style="color:#9ca3af;font-size:13px;margin:10px 0 0;">
+                ${loginUrl}
+              </p>
+            </td>
+          </tr>
+
+          <!-- Credentials box -->
+          <tr>
+            <td style="padding:28px 40px 0;">
+              <table cellpadding="0" cellspacing="0" width="100%" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <p style="color:#374151;font-size:13px;font-weight:600;margin:0 0 12px;text-transform:uppercase;letter-spacing:1px;">Your login details</p>
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="color:#6b7280;font-size:13px;padding-bottom:6px;width:140px;">Email</td>
+                        <td style="color:#111827;font-size:13px;font-weight:600;padding-bottom:6px;">${doctorEmail}</td>
+                      </tr>
+                      <tr>
+                        <td style="color:#6b7280;font-size:13px;padding-bottom:6px;">Specialization</td>
+                        <td style="color:#111827;font-size:13px;font-weight:600;padding-bottom:6px;">${specialization}</td>
+                      </tr>
+                      ${temporaryPassword ? `
+                      <tr>
+                        <td style="color:#6b7280;font-size:13px;padding-bottom:6px;">Temporary password</td>
+                        <td style="color:#111827;font-size:13px;font-weight:600;padding-bottom:6px;font-family:monospace;background:#fff;border:1px solid #e5e7eb;border-radius:4px;padding:4px 8px;">${temporaryPassword}</td>
+                      </tr>
+                      <tr>
+                        <td colspan="2" style="padding-top:8px;">
+                          <p style="color:#b45309;font-size:12px;margin:0;line-height:1.5;">
+                            Please change your password after your first login.
+                          </p>
+                        </td>
+                      </tr>` : `
+                      <tr>
+                        <td colspan="2" style="padding-top:4px;">
+                          <p style="color:#6b7280;font-size:12px;margin:0;line-height:1.5;">
+                            Your admin will share your temporary password separately.
+                          </p>
+                        </td>
+                      </tr>`}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Getting started -->
+          <tr>
+            <td style="padding:32px 40px 0;">
+              <p style="color:#111827;font-size:17px;font-weight:700;margin:0 0 20px;">Getting started</p>
+
+              <table cellpadding="0" cellspacing="0" style="margin-bottom:14px;width:100%;">
+                <tr>
+                  <td style="width:36px;vertical-align:top;">
+                    <div style="width:28px;height:28px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;text-align:center;line-height:28px;font-size:14px;font-weight:700;color:#2563eb;">1</div>
+                  </td>
+                  <td style="padding-left:12px;vertical-align:top;">
+                    <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 2px;">Start a new consultation</p>
+                    <p style="color:#6b7280;font-size:13px;margin:0;line-height:1.5;">Click <strong>+ New Consultation</strong> on your dashboard, search for the patient, and hit record.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table cellpadding="0" cellspacing="0" style="margin-bottom:14px;width:100%;">
+                <tr>
+                  <td style="width:36px;vertical-align:top;">
+                    <div style="width:28px;height:28px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;text-align:center;line-height:28px;font-size:14px;font-weight:700;color:#16a34a;">2</div>
+                  </td>
+                  <td style="padding-left:12px;vertical-align:top;">
+                    <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 2px;">Let Claude generate the note</p>
+                    <p style="color:#6b7280;font-size:13px;margin:0;line-height:1.5;">When the consultation ends, a full SOAP note is ready in under 30 seconds. Review, edit, and finalize.</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table cellpadding="0" cellspacing="0" style="margin-bottom:0;width:100%;">
+                <tr>
+                  <td style="width:36px;vertical-align:top;">
+                    <div style="width:28px;height:28px;background:#fdf4ff;border:1px solid #e9d5ff;border-radius:8px;text-align:center;line-height:28px;font-size:14px;font-weight:700;color:#9333ea;">3</div>
+                  </td>
+                  <td style="padding-left:12px;vertical-align:top;">
+                    <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 2px;">Explore the extras</p>
+                    <p style="color:#6b7280;font-size:13px;margin:0;line-height:1.5;">Chat with any clinical note, send patients a plain-language summary over WhatsApp, and message colleagues from the <strong>Messages</strong> tab.</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Features -->
+          <tr>
+            <td style="padding:28px 40px 0;">
+              <table cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td style="padding-bottom:10px;">
+                    <span style="color:#2e9690;font-weight:700;">🎙️ Real-time transcription</span>
+                    <span style="color:#6b7280;font-size:13px;"> — Nigerian English, Yoruba, Hausa, Igbo accents supported</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-bottom:10px;">
+                    <span style="color:#2e9690;font-weight:700;">📋 AI SOAP notes</span>
+                    <span style="color:#6b7280;font-size:13px;"> — Full clinical note generated in under 30 seconds</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-bottom:10px;">
+                    <span style="color:#2e9690;font-weight:700;">💬 Chat with your notes</span>
+                    <span style="color:#6b7280;font-size:13px;"> — Ask questions about any visit or across a patient's full history</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span style="color:#2e9690;font-weight:700;">👥 Team messaging</span>
+                    <span style="color:#6b7280;font-size:13px;"> — Live presence and direct messages with your colleagues</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:32px 40px;">
+              <p style="color:#9ca3af;font-size:12px;margin:0;line-height:1.6;">
+                Need help getting started? Reply to this email or reach us at
+                <a href="mailto:support@meditir.com" style="color:#2e9690;text-decoration:none;">support@meditir.com</a>
+              </p>
+              <p style="color:#d1d5db;font-size:11px;margin:16px 0 0;">
+                © ${new Date().getFullYear()} Meditir · Built for healthcare in Nigeria
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const { data: sendData, error: sendError } = await resend.emails.send({
+    from: FROM,
+    to: doctorEmail,
+    subject: `Welcome to Meditir — you've been added to ${hospitalName}`,
+    html,
+  });
+  if (sendError) {
+    console.error('[email] Resend rejected doctor onboarding email:', JSON.stringify(sendError));
+    throw new Error(`Resend error: ${sendError.name || 'unknown'} — ${sendError.message || JSON.stringify(sendError)}`);
+  }
+  console.log(`[email] Doctor onboarding email sent to ${doctorEmail}, id=${sendData?.id}`);
+};
+
 // Minimal markdown → HTML for AVS content (H2 headings, bullets, bold, line breaks).
 // Intentionally small — no external deps, trusted input (Claude output we control).
 const markdownToSafeHtml = (md: string): string => {
