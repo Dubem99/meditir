@@ -228,6 +228,19 @@ export interface Colleague {
   avatarUrl?: string | null;
 }
 
+export interface AttachedPatientSnapshot {
+  id: string;
+  firstName: string;
+  lastName: string;
+  medicalRecordNo?: string | null;
+  dateOfBirth?: string | null;
+  gender?: Gender | null;
+  bloodGroup?: string | null;
+  genotype?: string | null;
+  allergies?: string[];
+  chronicConditions?: string[];
+}
+
 export interface DirectMessage {
   id: string;
   conversationId: string;
@@ -236,6 +249,7 @@ export interface DirectMessage {
   content: string;
   attachedPatientId?: string | null;
   attachedSessionId?: string | null;
+  attachedPatient?: AttachedPatientSnapshot | null;
   readAt?: string | null;
   createdAt: string;
 }

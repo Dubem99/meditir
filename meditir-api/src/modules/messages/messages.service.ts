@@ -5,6 +5,71 @@ import { Role } from '../../types/enums';
 // Canonicalise a user pair so the same conversation is always keyed the same way.
 const canonicalPair = (a: string, b: string): [string, string] => (a < b ? [a, b] : [b, a]);
 
+// Shape used when a message references a patient — small snapshot the UI can render
+// inline without a second round trip.
+const patientAttachmentSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  medicalRecordNo: true,
+  dateOfBirth: true,
+  gender: true,
+  bloodGroup: true,
+  genotype: true,
+  allergies: true,
+  chronicConditions: true,
+} as const;
+
+type DirectMessageRecord = {
+  id: string;
+  attachedPatientId: string | null;
+  attachedSessionId: string | null;
+  [key: string]: unknown;
+};
+
+// DirectMessage has no Prisma relation to Patient (attachedPatientId is a plain string),
+// so we hydrate in a single batched query after fetching the messages.
+const hydrateAttachments = async <T extends DirectMessageRecord>(
+  messages: T[],
+  hospitalId: string
+): Promise<(T & { attachedPatient?: unknown; attachedSession?: unknown })[]> => {
+  const patientIds = Array.from(
+    new Set(messages.map((m) => m.attachedPatientId).filter((x): x is string => !!x))
+  );
+  const sessionIds = Array.from(
+    new Set(messages.map((m) => m.attachedSessionId).filter((x): x is string => !!x))
+  );
+
+  const [patients, sessions] = await Promise.all([
+    patientIds.length
+      ? prisma.patient.findMany({
+          where: { id: { in: patientIds }, hospitalId },
+          select: patientAttachmentSelect,
+        })
+      : Promise.resolve([]),
+    sessionIds.length
+      ? prisma.consultationSession.findMany({
+          where: { id: { in: sessionIds }, hospitalId },
+          select: {
+            id: true,
+            scheduledAt: true,
+            status: true,
+            doctor: { select: { firstName: true, lastName: true, specialization: true } },
+          },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const patientMap = new Map(patients.map((p) => [p.id, p]));
+  const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+
+  return messages.map((m) => ({
+    ...m,
+    attachedPatient: m.attachedPatientId ? patientMap.get(m.attachedPatientId) ?? null : null,
+    attachedSession: m.attachedSessionId ? sessionMap.get(m.attachedSessionId) ?? null : null,
+  }));
+};
+
 const ensureSameHospitalUser = async (userId: string, hospitalId: string) => {
   const user = await prisma.user.findFirst({
     where: { id: userId, hospitalId },
@@ -88,7 +153,8 @@ export const sendMessage = async (args: {
     data: { lastMessageAt: message.createdAt },
   });
 
-  return message;
+  const [hydrated] = await hydrateAttachments([message], args.hospitalId);
+  return hydrated;
 };
 
 export const listConversations = async (hospitalId: string, selfUserId: string) => {
@@ -152,11 +218,13 @@ export const listMessages = async (
     throw new AppError('You are not a participant in this conversation', 403);
   }
 
-  return prisma.directMessage.findMany({
+  const messages = await prisma.directMessage.findMany({
     where: { conversationId },
     orderBy: { createdAt: 'asc' },
     take: 200,
   });
+
+  return hydrateAttachments(messages, hospitalId);
 };
 
 export const markConversationRead = async (

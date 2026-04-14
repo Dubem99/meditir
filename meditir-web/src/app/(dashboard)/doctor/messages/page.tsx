@@ -8,7 +8,8 @@ import { useAuthStore } from '@/store/auth.store';
 import { usePresenceStore } from '@/store/presence.store';
 import { Spinner } from '@/components/ui/Spinner';
 import { format, isToday, isYesterday } from 'date-fns';
-import type { Colleague, ConversationSummary, DirectMessage } from '@/types/entities.types';
+import type { Colleague, ConversationSummary, DirectMessage, Patient, AttachedPatientSnapshot } from '@/types/entities.types';
+import { differenceInYears } from 'date-fns';
 
 const formatMessageTime = (iso: string) => {
   const d = new Date(iso);
@@ -30,6 +31,13 @@ export default function MessagesPage() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Patient attachment state
+  const [attachedPatient, setAttachedPatient] = useState<AttachedPatientSnapshot | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [patientQuery, setPatientQuery] = useState('');
+  const [patientResults, setPatientResults] = useState<Patient[]>([]);
+  const [searchingPatients, setSearchingPatients] = useState(false);
 
   // Load colleagues + conversations on mount
   useEffect(() => {
@@ -116,13 +124,55 @@ export default function MessagesPage() {
     };
   }, [selected, conversationForColleague]);
 
+  // Debounced patient search when picker is open
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let cancelled = false;
+    setSearchingPatients(true);
+    const t = setTimeout(() => {
+      api.get(`/patients?limit=20${patientQuery ? `&search=${encodeURIComponent(patientQuery)}` : ''}`)
+        .then((r) => {
+          if (!cancelled) setPatientResults(r.data.data || []);
+        })
+        .finally(() => !cancelled && setSearchingPatients(false));
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [pickerOpen, patientQuery]);
+
+  const attachPatient = (p: Patient) => {
+    setAttachedPatient({
+      id: p.id,
+      firstName: p.firstName,
+      lastName: p.lastName,
+      medicalRecordNo: p.medicalRecordNo ?? null,
+      dateOfBirth: p.dateOfBirth ?? null,
+      gender: p.gender ?? null,
+      bloodGroup: p.bloodGroup ?? null,
+      genotype: p.genotype ?? null,
+      allergies: p.allergies ?? [],
+      chronicConditions: p.chronicConditions ?? [],
+    });
+    setPickerOpen(false);
+    setPatientQuery('');
+  };
+
   const send = async () => {
-    if (!selected || !input.trim() || sending) return;
+    if (!selected || sending) return;
     const content = input.trim();
+    if (!content && !attachedPatient) return;
     setSending(true);
     setInput('');
+    const patientToAttach = attachedPatient;
+    setAttachedPatient(null);
     try {
-      const msg = await sendDirectMessage({ toUserId: selected.id, content });
+      const msg = await sendDirectMessage({
+        toUserId: selected.id,
+        content: content || (patientToAttach ? `Sharing patient: ${patientToAttach.firstName} ${patientToAttach.lastName}` : ''),
+        attachedPatientId: patientToAttach?.id,
+      });
       setMessages((prev) => [...prev, msg]);
       // Ensure conversation appears in the list
       setConversations((prev) => {
@@ -149,6 +199,7 @@ export default function MessagesPage() {
       });
     } catch {
       setInput(content);
+      setAttachedPatient(patientToAttach);
     } finally {
       setSending(false);
     }
@@ -315,6 +366,9 @@ export default function MessagesPage() {
                           }`}
                         >
                           <p className="whitespace-pre-wrap leading-relaxed break-words">{m.content}</p>
+                          {m.attachedPatient && (
+                            <PatientAttachmentCard patient={m.attachedPatient} isMine={isMine} />
+                          )}
                           <p
                             className={`text-[10px] mt-1 ${
                               isMine ? 'text-primary-100/80' : 'text-gray-400'
@@ -332,7 +386,43 @@ export default function MessagesPage() {
 
               {/* Input */}
               <div className="p-3 border-t border-gray-100 bg-white">
+                {attachedPatient && (
+                  <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-primary-50 border border-primary-100 rounded-xl">
+                    <svg className="h-4 w-4 text-primary-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-primary-900 truncate">
+                        {attachedPatient.firstName} {attachedPatient.lastName}
+                      </p>
+                      <p className="text-[10px] text-primary-700 truncate">
+                        {attachedPatient.medicalRecordNo ? `MRN ${attachedPatient.medicalRecordNo}` : 'No MRN'}
+                        {attachedPatient.bloodGroup && ` · ${attachedPatient.bloodGroup}`}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setAttachedPatient(null)}
+                      className="shrink-0 text-primary-500 hover:text-primary-700 p-1"
+                      aria-label="Remove attachment"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
+                  <button
+                    onClick={() => setPickerOpen(true)}
+                    disabled={sending}
+                    title="Attach patient"
+                    aria-label="Attach patient"
+                    className="shrink-0 h-[42px] w-[42px] flex items-center justify-center rounded-xl border border-gray-200 text-gray-500 hover:text-primary-600 hover:border-primary-200 hover:bg-primary-50 transition-colors disabled:opacity-40"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                  </button>
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -345,20 +435,163 @@ export default function MessagesPage() {
                   />
                   <button
                     onClick={send}
-                    disabled={sending || !input.trim()}
+                    disabled={sending || (!input.trim() && !attachedPatient)}
                     className="shrink-0 bg-primary-600 hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl px-4 py-2.5 text-sm font-medium transition-colors h-[42px]"
                   >
                     Send
                   </button>
                 </div>
                 <p className="text-[10px] text-gray-400 mt-1.5 text-center">
-                  Enter to send · Shift+Enter for new line
+                  Enter to send · Shift+Enter for new line · Paperclip attaches a patient
                 </p>
               </div>
             </>
           )}
         </main>
       </div>
+
+      {pickerOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 pt-20"
+          onClick={() => setPickerOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[70vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-900">Attach patient</h3>
+                <button
+                  onClick={() => setPickerOpen(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                  aria-label="Close"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <input
+                type="text"
+                autoFocus
+                value={patientQuery}
+                onChange={(e) => setPatientQuery(e.target.value)}
+                placeholder="Search by name or record number…"
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-300"
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {searchingPatients ? (
+                <div className="flex justify-center py-8"><Spinner size="sm" /></div>
+              ) : patientResults.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-8">No patients found.</p>
+              ) : (
+                patientResults.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => attachPatient(p)}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-50 last:border-0"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-blue-700 font-semibold text-xs shrink-0">
+                      {p.firstName[0]}{p.lastName[0]}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {p.firstName} {p.lastName}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {p.medicalRecordNo ? `MRN ${p.medicalRecordNo}` : 'No MRN'}
+                        {p.bloodGroup && ` · ${p.bloodGroup}`}
+                        {p.genotype && ` · ${p.genotype}`}
+                      </p>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PatientAttachmentCard({
+  patient,
+  isMine,
+}: {
+  patient: AttachedPatientSnapshot;
+  isMine: boolean;
+}) {
+  const age = patient.dateOfBirth
+    ? differenceInYears(new Date(), new Date(patient.dateOfBirth))
+    : null;
+  const containerClass = isMine
+    ? 'bg-primary-700/40 border-primary-400/40'
+    : 'bg-gray-50 border-gray-200';
+  const labelClass = isMine ? 'text-primary-100/80' : 'text-gray-500';
+  const valueClass = isMine ? 'text-white' : 'text-gray-800';
+  const chipClass = isMine
+    ? 'bg-white/20 text-white border-white/20'
+    : 'bg-white text-gray-700 border-gray-200';
+
+  return (
+    <div className={`mt-2 rounded-xl border p-3 text-xs ${containerClass}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <svg className={`h-4 w-4 ${isMine ? 'text-white' : 'text-primary-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+        </svg>
+        <p className={`font-semibold ${valueClass}`}>
+          {patient.firstName} {patient.lastName}
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        {patient.medicalRecordNo && (
+          <div>
+            <p className={labelClass}>MRN</p>
+            <p className={`font-mono ${valueClass}`}>{patient.medicalRecordNo}</p>
+          </div>
+        )}
+        {age !== null && (
+          <div>
+            <p className={labelClass}>Age</p>
+            <p className={valueClass}>{age}y {patient.gender ? `· ${patient.gender.charAt(0)}` : ''}</p>
+          </div>
+        )}
+        {patient.bloodGroup && (
+          <div>
+            <p className={labelClass}>Blood</p>
+            <p className={valueClass}>{patient.bloodGroup}</p>
+          </div>
+        )}
+        {patient.genotype && (
+          <div>
+            <p className={labelClass}>Genotype</p>
+            <p className={valueClass}>{patient.genotype}</p>
+          </div>
+        )}
+      </div>
+      {patient.allergies && patient.allergies.length > 0 && (
+        <div className="mt-2">
+          <p className={labelClass}>Allergies</p>
+          <div className="flex flex-wrap gap-1 mt-0.5">
+            {patient.allergies.map((a, i) => (
+              <span key={i} className={`px-1.5 py-0.5 rounded border ${chipClass}`}>{a}</span>
+            ))}
+          </div>
+        </div>
+      )}
+      {patient.chronicConditions && patient.chronicConditions.length > 0 && (
+        <div className="mt-2">
+          <p className={labelClass}>Chronic</p>
+          <div className="flex flex-wrap gap-1 mt-0.5">
+            {patient.chronicConditions.map((c, i) => (
+              <span key={i} className={`px-1.5 py-0.5 rounded border ${chipClass}`}>{c}</span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
