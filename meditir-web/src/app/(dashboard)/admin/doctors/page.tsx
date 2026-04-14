@@ -60,7 +60,8 @@ export default function AdminDoctorsPage() {
             </Link>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[600px]">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
                 {['Doctor', 'Specialization', 'License', 'Last Active', 'Status', ''].map((h) => (
@@ -111,6 +112,7 @@ export default function AdminDoctorsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

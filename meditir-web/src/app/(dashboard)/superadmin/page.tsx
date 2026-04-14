@@ -39,7 +39,8 @@ export default function SuperAdminDashboard() {
         ) : hospitals.length === 0 ? (
           <p className="text-center text-gray-400 py-12 text-sm">No hospitals registered yet</p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[500px]">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
                 {['Hospital', 'Slug', 'Email', 'Status', ''].map((h) => (
@@ -67,6 +68,7 @@ export default function SuperAdminDashboard() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
     </div>
