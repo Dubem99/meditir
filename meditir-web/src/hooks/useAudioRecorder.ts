@@ -16,11 +16,14 @@ export interface UseAudioRecorderReturn {
   isSupported: boolean;
 }
 
+// Chrome Web Speech API only reliably supports a subset of BCP47 tags.
+// en-US works best for all Nigerian English variants; other dialects
+// fall back to en-US since Chrome doesn't support those language codes.
 const dialectToLang: Record<Dialect, string> = {
-  NIGERIAN_ENGLISH: 'en-NG',
-  YORUBA_ACCENTED: 'yo',
-  HAUSA_ACCENTED: 'ha',
-  IGBO_ACCENTED: 'ig',
+  NIGERIAN_ENGLISH: 'en-US',
+  YORUBA_ACCENTED: 'en-US',
+  HAUSA_ACCENTED: 'en-US',
+  IGBO_ACCENTED: 'en-US',
 };
 
 // Use any for the Web Speech API since TypeScript lib types vary by version
@@ -54,7 +57,7 @@ export const useAudioRecorder = (dialect: Dialect = 'NIGERIAN_ENGLISH'): UseAudi
       const recognition: AnySpeechRecognition = new SpeechRecognitionImpl();
       recognitionRef.current = recognition;
 
-      recognition.lang = dialectToLang[dialect] ?? 'en-NG';
+      recognition.lang = dialectToLang[dialect] ?? 'en-US';
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
