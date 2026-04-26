@@ -4,6 +4,14 @@ import { AppError } from '../../utils/AppError';
 import { Role } from '../../types/enums';
 import { getPaginationParams, paginate } from '../../utils/pagination';
 import { sendDoctorOnboardingEmail } from '../../services/email.service';
+import {
+  parseCsvBuffer,
+  cleanRow,
+  generateTempPassword,
+  type BulkResult,
+  type BulkRowResult,
+} from '../../utils/csv';
+import { OnboardDoctorSchema } from './doctors.schema';
 import type { OnboardDoctorInput, UpdateDoctorInput, UpdateScheduleInput } from './doctors.schema';
 
 export const onboardDoctor = async (hospitalId: string, data: OnboardDoctorInput) => {
@@ -61,6 +69,69 @@ export const onboardDoctor = async (hospitalId: string, data: OnboardDoctorInput
   }).catch((err) => console.error('[email] Failed to send doctor onboarding email:', err));
 
   return doctor;
+};
+
+// Doctor onboarding via CSV. Each row becomes its own transaction so a single
+// bad row (duplicate license, invalid field) doesn't roll back the whole batch.
+// Password is optional in CSV — when blank we generate one and surface it back
+// to the admin (in addition to emailing the doctor) so they can hand it out manually.
+export const bulkOnboardDoctors = async (
+  hospitalId: string,
+  csvBuffer: Buffer
+): Promise<BulkResult> => {
+  const rows = parseCsvBuffer(csvBuffer);
+  const results: BulkRowResult[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const rowNumber = i + 2; // +2 because row 1 is the header in the source CSV
+    const cleaned = cleanRow(rows[i]);
+    const email = cleaned.email ?? '';
+
+    try {
+      const generatedPassword = cleaned.password ? undefined : generateTempPassword();
+      const candidate = {
+        email: cleaned.email,
+        password: cleaned.password ?? generatedPassword,
+        firstName: cleaned.firstName,
+        lastName: cleaned.lastName,
+        specialization: cleaned.specialization,
+        licenseNumber: cleaned.licenseNumber,
+        gender: cleaned.gender,
+        phone: cleaned.phone,
+        bio: cleaned.bio,
+        preferredDialect: cleaned.preferredDialect,
+      };
+
+      const parsed = OnboardDoctorSchema.safeParse(candidate);
+      if (!parsed.success) {
+        const fieldErrors = parsed.error.flatten().fieldErrors;
+        const message = Object.entries(fieldErrors)
+          .map(([f, msgs]) => `${f}: ${msgs?.join(', ')}`)
+          .join('; ');
+        results.push({ row: rowNumber, email, status: 'error', error: message });
+        continue;
+      }
+
+      const doctor = await onboardDoctor(hospitalId, parsed.data);
+      results.push({
+        row: rowNumber,
+        email,
+        status: 'success',
+        id: doctor.id,
+        ...(generatedPassword && { generatedPassword }),
+      });
+    } catch (err) {
+      const message = err instanceof AppError ? err.message : 'Unexpected error';
+      results.push({ row: rowNumber, email, status: 'error', error: message });
+    }
+  }
+
+  return {
+    totalRows: rows.length,
+    successful: results.filter((r) => r.status === 'success').length,
+    failed: results.filter((r) => r.status === 'error').length,
+    results,
+  };
 };
 
 export const listDoctors = async (

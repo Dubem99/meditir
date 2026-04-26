@@ -9,6 +9,12 @@ export const register = async (req: Request, res: Response): Promise<void> => {
   res.status(201).json({ status: 'success', data: patient });
 };
 
+export const bulkRegister = async (req: Request, res: Response): Promise<void> => {
+  if (!req.file) throw new AppError('CSV file is required (form field "file")', 400);
+  const result = await service.bulkRegisterPatients(hospitalId(req), req.file.buffer);
+  res.status(201).json({ status: 'success', data: result });
+};
+
 export const list = async (req: Request, res: Response): Promise<void> => {
   const result = await service.listPatients(
     hospitalId(req),

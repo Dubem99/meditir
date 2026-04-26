@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { Spinner } from '@/components/ui/Spinner';
+import { BulkUploadModal } from '@/components/admin/BulkUploadModal';
 import { format } from 'date-fns';
 import type { Patient } from '@/types/entities.types';
 import Link from 'next/link';
@@ -12,6 +13,7 @@ export default function AdminPatientsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [total, setTotal] = useState(0);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const load = useCallback((q = '') => {
     setLoading(true);
@@ -37,13 +39,28 @@ export default function AdminPatientsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Patients</h1>
           <p className="text-sm text-gray-500 mt-0.5">{total} registered</p>
         </div>
-        <Link
-          href="/admin/onboarding"
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors shadow-sm"
-        >
-          + Register Patient
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setBulkOpen(true)}
+            className="flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-300 text-gray-700 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors shadow-sm"
+          >
+            Bulk upload CSV
+          </button>
+          <Link
+            href="/admin/onboarding"
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors shadow-sm"
+          >
+            + Register Patient
+          </Link>
+        </div>
       </div>
+
+      <BulkUploadModal
+        entity="patients"
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        onComplete={() => load(search)}
+      />
 
       {/* Search */}
       <form onSubmit={handleSearch} className="flex gap-2">

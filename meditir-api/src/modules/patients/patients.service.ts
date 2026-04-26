@@ -3,6 +3,15 @@ import { hashPassword } from '../../utils/bcrypt';
 import { AppError } from '../../utils/AppError';
 import { Role } from '../../types/enums';
 import { getPaginationParams, paginate } from '../../utils/pagination';
+import {
+  parseCsvBuffer,
+  cleanRow,
+  splitList,
+  generateTempPassword,
+  type BulkResult,
+  type BulkRowResult,
+} from '../../utils/csv';
+import { RegisterPatientSchema } from './patients.schema';
 import type { RegisterPatientInput, UpdatePatientInput } from './patients.schema';
 
 export const registerPatient = async (hospitalId: string, data: RegisterPatientInput) => {
@@ -73,6 +82,76 @@ export const registerPatient = async (hospitalId: string, data: RegisterPatientI
       include: { user: { select: { email: true } } },
     });
   });
+};
+
+// Patient registration via CSV. Each row gets its own transaction so a single
+// duplicate email or invalid field doesn't kill the batch. Password is optional;
+// missing passwords get a generated temp value emailed to the patient.
+// Phone-duplicate soft-checks are bypassed (forceCreate: true) — bulk imports
+// from existing PMS often share family phones, and the admin can dedupe later.
+export const bulkRegisterPatients = async (
+  hospitalId: string,
+  csvBuffer: Buffer
+): Promise<BulkResult> => {
+  const rows = parseCsvBuffer(csvBuffer);
+  const results: BulkRowResult[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const rowNumber = i + 2;
+    const cleaned = cleanRow(rows[i]);
+    const email = cleaned.email ?? '';
+
+    try {
+      const generatedPassword = cleaned.password ? undefined : generateTempPassword();
+      const candidate = {
+        email: cleaned.email,
+        password: cleaned.password ?? generatedPassword,
+        firstName: cleaned.firstName,
+        lastName: cleaned.lastName,
+        dateOfBirth: cleaned.dateOfBirth,
+        gender: cleaned.gender,
+        bloodGroup: cleaned.bloodGroup,
+        genotype: cleaned.genotype,
+        phone: cleaned.phone,
+        address: cleaned.address,
+        nextOfKin: cleaned.nextOfKin,
+        nextOfKinPhone: cleaned.nextOfKinPhone,
+        medicalRecordNo: cleaned.medicalRecordNo,
+        allergies: splitList(cleaned.allergies),
+        chronicConditions: splitList(cleaned.chronicConditions),
+        forceCreate: true,
+      };
+
+      const parsed = RegisterPatientSchema.safeParse(candidate);
+      if (!parsed.success) {
+        const fieldErrors = parsed.error.flatten().fieldErrors;
+        const message = Object.entries(fieldErrors)
+          .map(([f, msgs]) => `${f}: ${msgs?.join(', ')}`)
+          .join('; ');
+        results.push({ row: rowNumber, email, status: 'error', error: message });
+        continue;
+      }
+
+      const patient = await registerPatient(hospitalId, parsed.data);
+      results.push({
+        row: rowNumber,
+        email,
+        status: 'success',
+        id: patient.id,
+        ...(generatedPassword && { generatedPassword }),
+      });
+    } catch (err) {
+      const message = err instanceof AppError ? err.message : 'Unexpected error';
+      results.push({ row: rowNumber, email, status: 'error', error: message });
+    }
+  }
+
+  return {
+    totalRows: rows.length,
+    successful: results.filter((r) => r.status === 'success').length,
+    failed: results.filter((r) => r.status === 'error').length,
+    results,
+  };
 };
 
 export const listPatients = async (

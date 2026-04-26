@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
+import { BulkUploadModal } from '@/components/admin/BulkUploadModal';
 import { format } from 'date-fns';
 import type { Doctor } from '@/types/entities.types';
 import Link from 'next/link';
@@ -12,6 +13,7 @@ export default function AdminDoctorsPage() {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -41,13 +43,28 @@ export default function AdminDoctorsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Doctors</h1>
           <p className="text-sm text-gray-500 mt-0.5">{doctors.length} registered</p>
         </div>
-        <Link
-          href="/admin/onboarding"
-          className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors shadow-sm"
-        >
-          + Onboard Doctor
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setBulkOpen(true)}
+            className="flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-300 text-gray-700 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors shadow-sm"
+          >
+            Bulk upload CSV
+          </button>
+          <Link
+            href="/admin/onboarding"
+            className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors shadow-sm"
+          >
+            + Onboard Doctor
+          </Link>
+        </div>
       </div>
+
+      <BulkUploadModal
+        entity="doctors"
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        onComplete={load}
+      />
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
         {loading ? (

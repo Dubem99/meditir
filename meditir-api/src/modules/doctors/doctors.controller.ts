@@ -1,10 +1,17 @@
 import { Request, Response } from 'express';
 import * as service from './doctors.service';
 import { param, hospitalId } from '../../utils/params';
+import { AppError } from '../../utils/AppError';
 
 export const onboard = async (req: Request, res: Response): Promise<void> => {
   const doctor = await service.onboardDoctor(hospitalId(req), req.body);
   res.status(201).json({ status: 'success', data: doctor });
+};
+
+export const bulkOnboard = async (req: Request, res: Response): Promise<void> => {
+  if (!req.file) throw new AppError('CSV file is required (form field "file")', 400);
+  const result = await service.bulkOnboardDoctors(hospitalId(req), req.file.buffer);
+  res.status(201).json({ status: 'success', data: result });
 };
 
 export const list = async (req: Request, res: Response): Promise<void> => {
