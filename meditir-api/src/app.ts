@@ -26,6 +26,7 @@ import noteChatRoutes from './modules/note-chat/note-chat.routes';
 import messagesRoutes from './modules/messages/messages.routes';
 import ttsRoutes from './modules/tts/tts.routes';
 import adminRoutes from './modules/admin/admin.routes';
+import auditRoutes from './modules/audit/audit.routes';
 
 export const createApp = () => {
   const app = express();
@@ -87,6 +88,7 @@ export const createApp = () => {
         'messages',
         'tts',
         'admin',
+        'audit',
       ],
       commit: process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown',
     });
@@ -117,6 +119,7 @@ export const createApp = () => {
   app.use(`${base}/messages`, messagesRoutes);
   app.use(`${base}/tts`, ttsRoutes);
   app.use(`${base}/admin`, adminRoutes);
+  app.use(`${base}/audit`, auditRoutes);
 
   // 404 handler
   app.use((req, res) => {

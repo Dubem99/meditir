@@ -29,6 +29,10 @@ const configSchema = z.object({
 
   REDIS_URL: z.string().optional(),
 
+  // Optional bearer token for read-only system audit endpoints. When unset,
+  // audit routes are disabled. Used by the weekly NHIA spot-check routine.
+  AUDIT_BEARER_TOKEN: z.string().min(32).optional(),
+
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('debug'),
 });
 
