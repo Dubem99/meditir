@@ -48,6 +48,11 @@ export const patchBillingCode = async (req: Request, res: Response): Promise<voi
   res.json({ status: 'success', data: c });
 };
 
+export const createBillingCode = async (req: Request, res: Response): Promise<void> => {
+  const c = await service.addBillingCode(hospitalId(req), req.body);
+  res.status(201).json({ status: 'success', data: c });
+};
+
 export const createProblem = async (req: Request, res: Response): Promise<void> => {
   const { soapNoteId, ...data } = req.body;
   const p = await service.addProblem(soapNoteId, hospitalId(req), data);

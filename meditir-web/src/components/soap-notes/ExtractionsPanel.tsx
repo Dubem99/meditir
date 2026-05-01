@@ -116,26 +116,96 @@ const codeSystemMeta: Partial<Record<CodeSystem, { label: string }>> = {
 
 const PICKER_SYSTEMS: CodeSystem[] = ['ICD10', 'SNOMED'];
 
+const AddCodeForm = ({
+  system,
+  onSubmit,
+  onCancel,
+}: {
+  system: CodeSystem;
+  onSubmit: (code: string, description: string) => Promise<void>;
+  onCancel: () => void;
+}) => {
+  const [code, setCode] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    if (!code.trim() || !description.trim()) return;
+    setSubmitting(true);
+    try {
+      await onSubmit(code.trim(), description.trim());
+      setCode('');
+      setDescription('');
+    } catch {
+      // error surfaced by parent via actionError
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 bg-emerald-50/40 border border-emerald-100 rounded-lg px-2 py-1.5">
+      <input
+        autoFocus
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit();
+          if (e.key === 'Escape') onCancel();
+        }}
+        placeholder={system === 'SNOMED' ? '41582007' : 'J03.0'}
+        className="font-mono text-[11px] bg-white border border-gray-200 rounded px-1.5 py-1 w-24 outline-none focus:border-emerald-300"
+      />
+      <input
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit();
+          if (e.key === 'Escape') onCancel();
+        }}
+        placeholder="Description"
+        className="text-[11px] bg-white border border-gray-200 rounded px-1.5 py-1 flex-1 min-w-[140px] outline-none focus:border-emerald-300"
+      />
+      <button
+        onClick={submit}
+        disabled={submitting || !code.trim() || !description.trim()}
+        className="text-[11px] font-medium text-emerald-700 hover:text-emerald-800 disabled:opacity-40 px-2 py-1"
+      >
+        {submitting ? 'Saving…' : 'Save'}
+      </button>
+      <button
+        onClick={onCancel}
+        disabled={submitting}
+        className="text-[11px] text-gray-400 hover:text-gray-600 px-1.5 py-1"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+};
+
 const CodePicker = ({
   problem,
   busyId,
   readOnly,
   onSelect,
+  onAdd,
 }: {
   problem: Problem;
   busyId: string | null;
   readOnly?: boolean;
   onSelect: (problemId: string, codeId: string, codeType: CodeSystem) => void;
+  onAdd: (problemId: string, codeType: CodeSystem, code: string, description: string) => Promise<void>;
 }) => {
+  const [addingFor, setAddingFor] = useState<CodeSystem | null>(null);
   const codes = problem.billingCodes ?? [];
-  if (codes.length === 0) return null;
 
   return (
     <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
       {PICKER_SYSTEMS.map((system) => {
         const systemCodes = codes.filter((c) => c.codeType === system);
-        if (systemCodes.length === 0) return null;
         const meta = codeSystemMeta[system];
+        const isAdding = addingFor === system;
         return (
           <div key={system} className="flex items-start gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mt-1.5 w-14 shrink-0">
@@ -183,6 +253,27 @@ const CodePicker = ({
                   </button>
                 );
               })}
+              {systemCodes.length === 0 && !isAdding && (
+                <span className="text-[11px] text-gray-300 italic mt-1">No suggestions</span>
+              )}
+              {!readOnly && !isAdding && (
+                <button
+                  onClick={() => setAddingFor(system)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-dashed border-gray-300 hover:border-emerald-300 hover:bg-emerald-50/40 px-2 py-1 text-[11px] text-gray-500 hover:text-emerald-700 transition-colors"
+                >
+                  <span className="text-sm leading-none">+</span> Add
+                </button>
+              )}
+              {isAdding && (
+                <AddCodeForm
+                  system={system}
+                  onSubmit={async (code, description) => {
+                    await onAdd(problem.id, system, code, description);
+                    setAddingFor(null);
+                  }}
+                  onCancel={() => setAddingFor(null)}
+                />
+              )}
             </div>
           </div>
         );
@@ -279,6 +370,37 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
       setActionError(describeError(err, 'Select code'));
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const addCode = async (
+    problemId: string,
+    codeType: CodeSystem,
+    code: string,
+    description: string
+  ) => {
+    setActionError(null);
+    try {
+      const res = await api.post('/ehr-extractions/billing-codes', {
+        problemId,
+        codeType,
+        code,
+        description,
+      });
+      const created: BillingCode = res.data.data;
+      onChange({
+        ...extractions,
+        problems: extractions.problems.map((p) => {
+          if (p.id !== problemId) return p;
+          const codes = (p.billingCodes ?? []).map((c) =>
+            c.codeType === codeType ? { ...c, isSelected: false } : c
+          );
+          return { ...p, billingCodes: [...codes, created] };
+        }),
+      });
+    } catch (err) {
+      setActionError(describeError(err, 'Add code'));
+      throw err;
     }
   };
 
@@ -399,6 +521,7 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
                     busyId={busyId}
                     readOnly={readOnly}
                     onSelect={selectCode}
+                    onAdd={addCode}
                   />
                 </div>
               );

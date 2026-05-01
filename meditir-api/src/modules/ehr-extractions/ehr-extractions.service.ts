@@ -259,6 +259,51 @@ export const deleteBillingCode = async (id: string, hospitalId: string) => {
   await prisma.billingCode.delete({ where: { id } });
 };
 
+export const addBillingCode = async (
+  hospitalId: string,
+  data: {
+    problemId?: string | null;
+    codeType: string;
+    code: string;
+    description: string;
+  }
+) => {
+  const code = data.code.trim();
+  const description = data.description.trim();
+  if (!code) throw new AppError('Code is required', 400);
+  if (!description) throw new AppError('Description is required', 400);
+
+  // Doctor-added codes always belong to a Problem (use the visit-level CPT
+  // section for unattached codes — different flow). Validate the parent.
+  if (!data.problemId) throw new AppError('problemId is required', 400);
+  const problem = await prisma.problem.findFirst({
+    where: { id: data.problemId, hospitalId },
+    include: { soapNote: true },
+  });
+  if (!problem) throw new AppError('Problem not found', 404);
+
+  return prisma.$transaction(async (tx) => {
+    // New code becomes the selection; deselect existing siblings of same system.
+    await tx.billingCode.updateMany({
+      where: { problemId: problem.id, codeType: data.codeType },
+      data: { isSelected: false },
+    });
+    return tx.billingCode.create({
+      data: {
+        soapNoteId: problem.soapNoteId,
+        hospitalId,
+        patientId: problem.patientId,
+        problemId: problem.id,
+        codeType: data.codeType,
+        code,
+        description,
+        isSelected: true,
+        source: 'DOCTOR_ADDED',
+      },
+    });
+  });
+};
+
 // Toggle isSelected on a candidate code. When selecting, atomically deselect
 // siblings — same Problem + same code system — so each system has at most one
 // selection per Problem. Visit-level codes (problemId=null) are independent.
