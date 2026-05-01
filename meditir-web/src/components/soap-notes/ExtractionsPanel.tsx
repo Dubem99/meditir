@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { api } from '@/lib/api';
 import type {
   EhrExtractions,
@@ -10,6 +10,7 @@ import type {
   CodeSystem,
   ProblemStatus,
   OrderStatus,
+  NhiaTariffEntry,
 } from '@/types/entities.types';
 
 interface Props {
@@ -105,6 +106,133 @@ const SectionHeader = ({
     </span>
   </div>
 );
+
+// ─────────── NHIA helpers ───────────
+
+const formatNgn = (n: number | null | undefined) =>
+  n == null ? '' : `₦${n.toLocaleString('en-NG')}`;
+
+const findNhiaCode = (codes: BillingCode[] | undefined): BillingCode | null =>
+  (codes ?? []).find((c) => c.codeType === 'NHIA' && c.isSelected) ?? null;
+
+const NhiaChip = ({
+  code,
+  onClick,
+  onRemove,
+  readOnly,
+}: {
+  code: BillingCode;
+  onClick?: () => void;
+  onRemove?: () => void;
+  readOnly?: boolean;
+}) => (
+  <span
+    className={[
+      'inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px]',
+      'bg-amber-50 border-amber-200 text-amber-900',
+    ].join(' ')}
+    title={code.description}
+  >
+    <span className="text-[9px] font-semibold uppercase tracking-wider text-amber-600">NHIA</span>
+    <span className="font-mono font-semibold">{code.code}</span>
+    <span className="truncate max-w-[160px] text-amber-800">{code.description}</span>
+    {code.tariffNgn != null && (
+      <span className="font-semibold text-amber-900">{formatNgn(code.tariffNgn)}</span>
+    )}
+    {!readOnly && onClick && (
+      <button
+        onClick={onClick}
+        className="text-[10px] text-amber-700 hover:text-amber-900 underline-offset-2 hover:underline"
+      >
+        change
+      </button>
+    )}
+    {!readOnly && onRemove && (
+      <button
+        onClick={onRemove}
+        className="text-amber-400 hover:text-red-500 text-base leading-none ml-0.5"
+        aria-label="Remove"
+      >
+        ×
+      </button>
+    )}
+  </span>
+);
+
+const NhiaPickerDialog = ({
+  catalog,
+  onPick,
+  onClose,
+  catalogLoading,
+}: {
+  catalog: NhiaTariffEntry[];
+  catalogLoading: boolean;
+  onPick: (entry: NhiaTariffEntry) => void;
+  onClose: () => void;
+}) => {
+  const [query, setQuery] = useState('');
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return catalog.slice(0, 100);
+    return catalog
+      .filter(
+        (e) =>
+          e.code.toLowerCase().includes(q) ||
+          e.description.toLowerCase().includes(q)
+      )
+      .slice(0, 100);
+  }, [catalog, query]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center pt-24 px-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-xl max-h-[70vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-3 border-b border-gray-100">
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search NHIA tariff (code or description)…"
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-300"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {catalogLoading ? (
+            <p className="text-sm text-gray-400 text-center py-8">Loading catalog…</p>
+          ) : filtered.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">No matches.</p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {filtered.map((e) => (
+                <li key={e.code}>
+                  <button
+                    onClick={() => onPick(e)}
+                    className="w-full text-left px-3 py-2 hover:bg-amber-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-semibold text-gray-700">{e.code}</span>
+                      {e.tariffNgn != null && (
+                        <span className="text-xs font-semibold text-amber-700 ml-auto">{formatNgn(e.tariffNgn)}</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-600 mt-0.5">{e.description}</p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="p-2 border-t border-gray-100 text-right">
+          <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ─────────── Code picker (per-Problem) ───────────
 
@@ -289,6 +417,22 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showCodes, setShowCodes] = useState(false);
+  // NHIA picker target: 'visit' | { kind: 'order', orderId: string } | null
+  const [nhiaPickerTarget, setNhiaPickerTarget] =
+    useState<{ kind: 'visit' } | { kind: 'order'; orderId: string } | null>(null);
+  const [nhiaCatalog, setNhiaCatalog] = useState<NhiaTariffEntry[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+
+  // Fetch the NHIA catalog the first time the picker opens.
+  useEffect(() => {
+    if (nhiaPickerTarget && nhiaCatalog.length === 0 && !catalogLoading) {
+      setCatalogLoading(true);
+      api
+        .get('/ehr-extractions/nhia-catalog')
+        .then((r) => setNhiaCatalog(r.data.data ?? []))
+        .finally(() => setCatalogLoading(false));
+    }
+  }, [nhiaPickerTarget, nhiaCatalog.length, catalogLoading]);
 
   const describeError = (err: unknown, action: string): string => {
     const e = err as { response?: { status?: number; data?: { message?: string } }; message?: string };
@@ -404,6 +548,85 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
     }
   };
 
+  // NHIA pick: create a new BillingCode (DOCTOR_ADDED) attached to the chosen
+  // scope and let the server auto-deselect siblings. Then update local state.
+  const pickNhia = async (entry: NhiaTariffEntry) => {
+    if (!nhiaPickerTarget) return;
+    setActionError(null);
+    try {
+      const body = {
+        codeType: 'NHIA',
+        code: entry.code,
+        description: entry.description,
+        tariffNgn: entry.tariffNgn,
+        ...(nhiaPickerTarget.kind === 'order'
+          ? { orderId: nhiaPickerTarget.orderId }
+          : { soapNoteId: extractions.soapNoteId }),
+      };
+      const res = await api.post('/ehr-extractions/billing-codes', body);
+      const created: BillingCode = res.data.data;
+
+      if (nhiaPickerTarget.kind === 'order') {
+        const orderId = nhiaPickerTarget.orderId;
+        onChange({
+          ...extractions,
+          orders: extractions.orders.map((o) => {
+            if (o.id !== orderId) return o;
+            const codes = (o.billingCodes ?? []).map((c) =>
+              c.codeType === 'NHIA' ? { ...c, isSelected: false } : c
+            );
+            return { ...o, billingCodes: [...codes, created] };
+          }),
+        });
+      } else {
+        // Visit-level: replace any existing visit-level NHIA in extractions.billingCodes.
+        const next = extractions.billingCodes
+          .map((c) => (c.codeType === 'NHIA' ? { ...c, isSelected: false } : c))
+          .concat(created);
+        onChange({ ...extractions, billingCodes: next });
+      }
+      setNhiaPickerTarget(null);
+    } catch (err) {
+      setActionError(describeError(err, 'Set NHIA code'));
+    }
+  };
+
+  const removeNhiaFromOrder = async (orderId: string, codeId: string) => {
+    setBusyId(codeId);
+    setActionError(null);
+    try {
+      await api.delete(`/ehr-extractions/billing-codes/${codeId}`);
+      onChange({
+        ...extractions,
+        orders: extractions.orders.map((o) =>
+          o.id === orderId
+            ? { ...o, billingCodes: (o.billingCodes ?? []).filter((c) => c.id !== codeId) }
+            : o
+        ),
+      });
+    } catch (err) {
+      setActionError(describeError(err, 'Remove NHIA code'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const removeVisitNhia = async (codeId: string) => {
+    setBusyId(codeId);
+    setActionError(null);
+    try {
+      await api.delete(`/ehr-extractions/billing-codes/${codeId}`);
+      onChange({
+        ...extractions,
+        billingCodes: extractions.billingCodes.filter((c) => c.id !== codeId),
+      });
+    } catch (err) {
+      setActionError(describeError(err, 'Remove NHIA code'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const updateProblemStatus = async (p: Problem, status: ProblemStatus) => {
     setBusyId(p.id);
     setActionError(null);
@@ -435,6 +658,22 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
   const total =
     extractions.problems.length + extractions.orders.length + extractions.billingCodes.length;
 
+  // Visit-level NHIA = consultation tariff. Lives in extractions.billingCodes
+  // (problemId=null AND orderId=null) with codeType=NHIA.
+  const visitNhia = extractions.billingCodes.find(
+    (c) => c.codeType === 'NHIA' && c.isSelected
+  );
+
+  // Tally NHIA tariffs across visit + orders for a quick "claim total" preview.
+  const claimTotal = [
+    visitNhia?.tariffNgn ?? 0,
+    ...extractions.orders.flatMap((o) =>
+      (o.billingCodes ?? [])
+        .filter((c) => c.codeType === 'NHIA' && c.isSelected)
+        .map((c) => c.tariffNgn ?? 0)
+    ),
+  ].reduce((a, b) => a + b, 0);
+
   return (
     <div className="space-y-6">
       {actionError && (
@@ -463,6 +702,38 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
           </button>
         )}
       </div>
+
+      {/* NHIA visit-level + claim total */}
+      <section className="rounded-xl border border-amber-200 bg-amber-50/50 p-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-700">
+            NHIA billing
+          </span>
+          {visitNhia ? (
+            <NhiaChip
+              code={visitNhia}
+              onClick={!readOnly ? () => setNhiaPickerTarget({ kind: 'visit' }) : undefined}
+              onRemove={!readOnly ? () => removeVisitNhia(visitNhia.id) : undefined}
+              readOnly={readOnly}
+            />
+          ) : (
+            !readOnly && (
+              <button
+                onClick={() => setNhiaPickerTarget({ kind: 'visit' })}
+                className="inline-flex items-center gap-1 rounded-lg border border-dashed border-amber-300 hover:border-amber-400 hover:bg-amber-100/50 px-2 py-1 text-[11px] text-amber-800 transition-colors"
+              >
+                <span className="text-sm leading-none">+</span> Add consultation tariff
+              </button>
+            )
+          )}
+          {claimTotal > 0 && (
+            <span className="ml-auto text-xs text-amber-900">
+              <span className="text-amber-600">Claim total:</span>{' '}
+              <span className="font-semibold">{formatNgn(claimTotal)}</span>
+            </span>
+          )}
+        </div>
+      </section>
 
       {/* Diagnoses */}
       <section>
@@ -621,6 +892,8 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
           <div className="space-y-2">
             {nonMedOrders.map((o) => {
               const meta = nonMedMeta[o.type as NonMedType];
+              const orderNhia = findNhiaCode(o.billingCodes);
+              const isReferral = o.type === 'REFERRAL';
               return (
                 <div
                   key={o.id}
@@ -639,6 +912,27 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
                       <p className="text-sm font-medium text-gray-900 break-words mt-0.5">{o.name}</p>
                       {o.instructions && (
                         <p className="text-xs text-gray-500 mt-0.5 italic break-words">{o.instructions}</p>
+                      )}
+                      {!isReferral && (
+                        <div className="flex items-center gap-2 flex-wrap mt-2">
+                          {orderNhia ? (
+                            <NhiaChip
+                              code={orderNhia}
+                              onClick={!readOnly ? () => setNhiaPickerTarget({ kind: 'order', orderId: o.id }) : undefined}
+                              onRemove={!readOnly ? () => removeNhiaFromOrder(o.id, orderNhia.id) : undefined}
+                              readOnly={readOnly}
+                            />
+                          ) : (
+                            !readOnly && (
+                              <button
+                                onClick={() => setNhiaPickerTarget({ kind: 'order', orderId: o.id })}
+                                className="inline-flex items-center gap-1 rounded-lg border border-dashed border-amber-200 hover:border-amber-300 hover:bg-amber-50/50 px-2 py-1 text-[11px] text-amber-700 transition-colors"
+                              >
+                                <span className="text-sm leading-none">+</span> NHIA tariff
+                              </button>
+                            )
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -678,8 +972,8 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
         )}
       </section>
 
-      {/* Billing Codes — collapsible, secondary */}
-      {extractions.billingCodes.length > 0 && (
+      {/* Visit-level non-NHIA codes (CPT etc.) — collapsible, secondary */}
+      {extractions.billingCodes.filter((c) => c.codeType !== 'NHIA').length > 0 && (
         <section className="pt-2 border-t border-gray-100">
           <button
             onClick={() => setShowCodes(!showCodes)}
@@ -692,7 +986,7 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
               Visit-level codes
             </span>
             <span className="text-xs font-medium text-gray-400 bg-gray-100 rounded-full px-2 py-0.5 tabular-nums">
-              {extractions.billingCodes.length}
+              {extractions.billingCodes.filter((c) => c.codeType !== 'NHIA').length}
             </span>
             <svg
               className={`h-4 w-4 text-gray-400 ml-auto transition-transform ${showCodes ? 'rotate-180' : ''}`}
@@ -705,7 +999,7 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
           </button>
           {showCodes && (
             <div className="mt-3 space-y-2">
-              {extractions.billingCodes.map((c: BillingCode) => (
+              {extractions.billingCodes.filter((c) => c.codeType !== 'NHIA').map((c: BillingCode) => (
                 <div
                   key={c.id}
                   className="flex items-start gap-3 border border-gray-200 rounded-xl p-3 bg-gray-50/50"
@@ -734,6 +1028,15 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
             </div>
           )}
         </section>
+      )}
+
+      {nhiaPickerTarget && (
+        <NhiaPickerDialog
+          catalog={nhiaCatalog}
+          catalogLoading={catalogLoading}
+          onPick={pickNhia}
+          onClose={() => setNhiaPickerTarget(null)}
+        />
       )}
     </div>
   );

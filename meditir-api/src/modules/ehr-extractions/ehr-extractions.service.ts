@@ -4,6 +4,7 @@ import { prisma } from '../../config/database';
 import { config } from '../../config';
 import { AppError } from '../../utils/AppError';
 import { logger } from '../../utils/logger';
+import { NHIA_TARIFF_PRIMARY_CARE } from '../../data/nhia-tariff';
 
 const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
@@ -12,6 +13,12 @@ const CodeCandidateSchema = z.object({
   code: z.string().min(1),
   description: z.string().min(1),
   isSelected: z.boolean().default(false),
+});
+
+const NhiaCodeSchema = z.object({
+  code: z.string().regex(/^NHIS-\d{3}-\d{3}$/, 'Must be NHIS-XXX-XXX format'),
+  description: z.string().min(1),
+  tariffNgn: z.number().int().nullable().optional(),
 });
 
 const ExtractionSchema = z.object({
@@ -32,6 +39,7 @@ const ExtractionSchema = z.object({
       frequency: z.string().optional().nullable(),
       duration: z.string().optional().nullable(),
       instructions: z.string().optional().nullable(),
+      nhiaCode: NhiaCodeSchema.optional().nullable(),
     })
   ).default([]),
   billingCodes: z.array(
@@ -41,37 +49,59 @@ const ExtractionSchema = z.object({
       description: z.string().min(1),
     })
   ).default([]),
+  visitNhiaCode: NhiaCodeSchema.optional().nullable(),
 });
 
 type Extraction = z.infer<typeof ExtractionSchema>;
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a clinical coding and EHR extraction assistant for Nigerian hospitals.
-Given a finalized SOAP note, extract three structured lists:
+// Lookup table to validate AI's NHIA picks against the catalog and pull
+// authoritative description + tariff (overriding whatever the model emits).
+const NHIA_BY_CODE = new Map(
+  NHIA_TARIFF_PRIMARY_CARE.map((e) => [e.code, e])
+);
+
+const formatNhiaCatalogForPrompt = (): string =>
+  NHIA_TARIFF_PRIMARY_CARE
+    .map((e) => `${e.code} | ${e.description}${e.tariffNgn ? ` | ₦${e.tariffNgn}` : ''}`)
+    .join('\n');
+
+const buildExtractionPrompt = () => `You are a clinical coding and EHR extraction assistant for Nigerian hospitals.
+Given a finalized SOAP note, extract structured lists for the EHR and Nigerian
+health insurance billing.
 
 1. PROBLEMS — distinct clinical problems / diagnoses / differentials mentioned in the Assessment.
    - status: ACTIVE (current), CHRONIC (long-standing), RESOLVED (already cleared), RULE_OUT (differential being excluded).
    - icd10Code: your single best ICD-10 pick (kept for back-compat). Use null if unsure.
-   - codes: an array of 2-4 coding candidates the clinician can pick from, drawing from BOTH:
-     * ICD10 — emit 1-2 plausible ICD-10 codes (most-likely first)
-     * SNOMED — emit 1-2 SNOMED CT concept IDs that match the diagnosis (numeric IDs, e.g., "41582007")
-   - For each Problem, mark exactly ONE code as isSelected=true per code system (your best guess).
-     Mark the rest as isSelected=false (alternatives the clinician may switch to).
-   - Only emit codes you are highly confident about. If unsure of the SNOMED ID, omit it rather than guess.
+   - codes: 2-4 coding candidates per Problem, drawing from BOTH:
+     * ICD10 — 1-2 plausible ICD-10 codes (most-likely first)
+     * SNOMED — 1-2 SNOMED CT concept IDs (numeric, e.g., "41582007")
+   - Mark exactly ONE code as isSelected=true per code system per Problem (your best guess).
+   - Only emit codes you are highly confident about. Omit SNOMED rather than guess the ID.
 
 2. ORDERS — actionable items in the Plan. One order per discrete action.
    - type: MEDICATION | LAB | IMAGING | PROCEDURE | REFERRAL
-   - For MEDICATION: fill dosage, frequency, duration when stated. Use Nigerian drug names where mentioned.
-   - For LAB/IMAGING: the test name (e.g., "FBC", "Chest X-ray").
-   - For REFERRAL: specialty or facility.
+   - MEDICATION: fill dosage, frequency, duration when stated. Use Nigerian drug names where mentioned.
+   - LAB/IMAGING: the test name (e.g., "FBC", "Chest X-ray").
+   - REFERRAL: specialty or facility.
+   - nhiaCode (LAB / IMAGING / PROCEDURE only): the matching NHIS tariff code from the
+     CATALOG below. Omit (null) if no clear match. Never invent a code that isn't in the
+     catalog. Skip nhiaCode for MEDICATION and REFERRAL orders entirely.
 
-3. BILLING CODES — visit-level CPT codes only (E&M codes, procedure codes not tied to a single diagnosis).
+3. BILLING_CODES — visit-level CPT codes only.
    - Diagnosis-level codes belong in PROBLEMS.codes, not here.
-   - Only emit codes you are confident about.
+
+4. VISIT_NHIA_CODE — the consultation-level NHIS tariff for this visit.
+   - Pick from the CONSULTATION section of the catalog (NHIS-010-XXX) based on the
+     visit type (initial vs review vs nursing). Omit if unclear.
+
+═══ NHIS TARIFF CATALOG (source of truth — only emit codes from this list) ═══
+${formatNhiaCatalogForPrompt()}
+═══ END CATALOG ═══
 
 Rules:
 - Only extract items explicitly supported by the SOAP note. Do not invent.
-- If a section has nothing, return an empty array.
-- Respond ONLY with a valid JSON object matching the schema below. No markdown, no commentary.
+- For NHIA codes, only emit codes that appear verbatim in the catalog above.
+- Respond ONLY with a valid JSON object. No markdown, no commentary.
 
 JSON format:
 {
@@ -82,13 +112,15 @@ JSON format:
     "notes": null,
     "codes": [
       {"codeType": "ICD10", "code": "J03.0", "description": "Streptococcal tonsillitis", "isSelected": true},
-      {"codeType": "ICD10", "code": "J30.1", "description": "Allergic rhinitis due to pollen", "isSelected": false},
-      {"codeType": "SNOMED", "code": "41582007", "description": "Streptococcal tonsillitis", "isSelected": true},
-      {"codeType": "SNOMED", "code": "90979004", "description": "Chronic tonsillitis", "isSelected": false}
+      {"codeType": "SNOMED", "code": "41582007", "description": "Streptococcal tonsillitis", "isSelected": true}
     ]
   }],
-  "orders": [{"type": "MEDICATION", "name": "Amoxicillin", "dosage": "500mg", "frequency": "TDS", "duration": "7 days", "instructions": null}],
-  "billingCodes": [{"codeType": "CPT", "code": "99213", "description": "Office visit, established patient, low complexity"}]
+  "orders": [
+    {"type": "LAB", "name": "Full Blood Count", "nhiaCode": {"code": "NHIS-181-101", "description": "Full Blood Count (FBC) (All Parameters)"}},
+    {"type": "MEDICATION", "name": "Amoxicillin", "dosage": "500mg", "frequency": "TDS", "duration": "7 days"}
+  ],
+  "billingCodes": [],
+  "visitNhiaCode": {"code": "NHIS-010-001", "description": "Specialist Initial Consultation"}
 }`;
 
 const stripFence = (s: string) =>
@@ -104,8 +136,8 @@ export const extractFromSOAPNote = async (soapNoteId: string): Promise<Extractio
   try {
     const response = await client.messages.create({
       model: config.CLAUDE_MODEL,
-      max_tokens: 2048,
-      system: EXTRACTION_SYSTEM_PROMPT,
+      max_tokens: 4096,
+      system: buildExtractionPrompt(),
       messages: [{ role: 'user', content: `SOAP Note:\n${noteText}` }],
     });
     const content = response.content[0];
@@ -116,16 +148,32 @@ export const extractFromSOAPNote = async (soapNoteId: string): Promise<Extractio
     return null;
   }
 
+  // Validate AI's NHIA picks against the catalog. Drop anything not in our list,
+  // and override with the canonical description + tariff so a typo or
+  // hallucination can never persist.
+  const validateNhia = (
+    raw: { code: string; description: string; tariffNgn?: number | null } | null | undefined
+  ) => {
+    if (!raw) return null;
+    const entry = NHIA_BY_CODE.get(raw.code);
+    if (!entry) return null;
+    return {
+      code: entry.code,
+      description: entry.description,
+      tariffNgn: entry.tariffNgn,
+    };
+  };
+
   await prisma.$transaction(async (tx) => {
     // Wipe prior AI-extracted rows so re-runs don't duplicate. Keep doctor-added.
-    // BillingCodes are cascade-deleted with their parent Problem, so deleting
-    // AI-extracted Problems clears their candidate codes automatically.
+    // BillingCodes cascade-delete with parent Problem/Order, so deleting
+    // AI-extracted Problems and Orders clears their attached codes automatically.
     await tx.problem.deleteMany({ where: { soapNoteId, source: 'AI_EXTRACTED' } });
     await tx.order.deleteMany({ where: { soapNoteId, source: 'AI_EXTRACTED' } });
-    // Wipe visit-level (problemId=null) AI billing codes — diagnosis codes
-    // were already wiped via the Problem cascade above.
+    // Wipe visit-level (problemId=null AND orderId=null) AI billing codes —
+    // problem and order codes are already gone via cascade.
     await tx.billingCode.deleteMany({
-      where: { soapNoteId, source: 'AI_EXTRACTED', problemId: null },
+      where: { soapNoteId, source: 'AI_EXTRACTED', problemId: null, orderId: null },
     });
 
     for (const p of parsed.problems) {
@@ -153,9 +201,10 @@ export const extractFromSOAPNote = async (soapNoteId: string): Promise<Extractio
       });
     }
 
-    if (parsed.orders.length > 0) {
-      await tx.order.createMany({
-        data: parsed.orders.map((o) => ({
+    for (const o of parsed.orders) {
+      const nhia = validateNhia(o.nhiaCode);
+      await tx.order.create({
+        data: {
           soapNoteId,
           hospitalId: note.hospitalId,
           patientId: note.patientId,
@@ -165,7 +214,39 @@ export const extractFromSOAPNote = async (soapNoteId: string): Promise<Extractio
           frequency: o.frequency ?? null,
           duration: o.duration ?? null,
           instructions: o.instructions ?? null,
-        })),
+          billingCodes: nhia
+            ? {
+                create: [
+                  {
+                    soapNoteId,
+                    hospitalId: note.hospitalId,
+                    patientId: note.patientId,
+                    codeType: 'NHIA',
+                    code: nhia.code,
+                    description: nhia.description,
+                    tariffNgn: nhia.tariffNgn,
+                    isSelected: true,
+                  },
+                ],
+              }
+            : undefined,
+        },
+      });
+    }
+
+    const visitNhia = validateNhia(parsed.visitNhiaCode);
+    if (visitNhia) {
+      await tx.billingCode.create({
+        data: {
+          soapNoteId,
+          hospitalId: note.hospitalId,
+          patientId: note.patientId,
+          codeType: 'NHIA',
+          code: visitNhia.code,
+          description: visitNhia.description,
+          tariffNgn: visitNhia.tariffNgn,
+          isSelected: true,
+        },
       });
     }
 
@@ -198,9 +279,13 @@ export const getExtractionsForSession = async (sessionId: string, hospitalId: st
       orderBy: { createdAt: 'asc' },
       include: { billingCodes: { orderBy: { createdAt: 'asc' } } },
     }),
-    prisma.order.findMany({ where: { soapNoteId: note.id }, orderBy: { createdAt: 'asc' } }),
+    prisma.order.findMany({
+      where: { soapNoteId: note.id },
+      orderBy: { createdAt: 'asc' },
+      include: { billingCodes: { orderBy: { createdAt: 'asc' } } },
+    }),
     prisma.billingCode.findMany({
-      where: { soapNoteId: note.id, problemId: null },
+      where: { soapNoteId: note.id, problemId: null, orderId: null },
       orderBy: { createdAt: 'asc' },
     }),
   ]);
@@ -253,6 +338,16 @@ export const deleteOrder = async (id: string, hospitalId: string) => {
   await prisma.order.delete({ where: { id } });
 };
 
+// Read-only access to the NHIA tariff catalog (primary-care subset). Used by
+// the UI to render a dropdown when the doctor manually adds an NHIA code.
+export const getNhiaCatalog = () =>
+  NHIA_TARIFF_PRIMARY_CARE.map((e) => ({
+    code: e.code,
+    description: e.description,
+    tariffNgn: e.tariffNgn,
+    section: e.section,
+  }));
+
 export const deleteBillingCode = async (id: string, hospitalId: string) => {
   const existing = await prisma.billingCode.findFirst({ where: { id, hospitalId } });
   if (!existing) throw new AppError('Billing code not found', 404);
@@ -263,9 +358,12 @@ export const addBillingCode = async (
   hospitalId: string,
   data: {
     problemId?: string | null;
+    orderId?: string | null;
+    soapNoteId?: string | null;
     codeType: string;
     code: string;
     description: string;
+    tariffNgn?: number | null;
   }
 ) => {
   const code = data.code.trim();
@@ -273,30 +371,76 @@ export const addBillingCode = async (
   if (!code) throw new AppError('Code is required', 400);
   if (!description) throw new AppError('Description is required', 400);
 
-  // Doctor-added codes always belong to a Problem (use the visit-level CPT
-  // section for unattached codes — different flow). Validate the parent.
-  if (!data.problemId) throw new AppError('problemId is required', 400);
-  const problem = await prisma.problem.findFirst({
-    where: { id: data.problemId, hospitalId },
-    include: { soapNote: true },
-  });
-  if (!problem) throw new AppError('Problem not found', 404);
+  // Resolve parent: a code attaches to either a Problem, an Order, or
+  // visit-level (no parent — pass soapNoteId directly).
+  let parentSoapNoteId: string;
+  let parentPatientId: string;
+  let scopedProblemId: string | null = null;
+  let scopedOrderId: string | null = null;
+
+  if (data.problemId) {
+    const problem = await prisma.problem.findFirst({
+      where: { id: data.problemId, hospitalId },
+    });
+    if (!problem) throw new AppError('Problem not found', 404);
+    parentSoapNoteId = problem.soapNoteId;
+    parentPatientId = problem.patientId;
+    scopedProblemId = problem.id;
+  } else if (data.orderId) {
+    const order = await prisma.order.findFirst({
+      where: { id: data.orderId, hospitalId },
+    });
+    if (!order) throw new AppError('Order not found', 404);
+    parentSoapNoteId = order.soapNoteId;
+    parentPatientId = order.patientId;
+    scopedOrderId = order.id;
+  } else if (data.soapNoteId) {
+    const note = await prisma.sOAPNote.findFirst({
+      where: { id: data.soapNoteId, hospitalId },
+    });
+    if (!note) throw new AppError('SOAP note not found', 404);
+    parentSoapNoteId = note.id;
+    parentPatientId = note.patientId;
+  } else {
+    throw new AppError('problemId, orderId, or soapNoteId is required', 400);
+  }
 
   return prisma.$transaction(async (tx) => {
-    // New code becomes the selection; deselect existing siblings of same system.
-    await tx.billingCode.updateMany({
-      where: { problemId: problem.id, codeType: data.codeType },
-      data: { isSelected: false },
-    });
+    // New code becomes the selection; deselect existing siblings within the
+    // same scope + same code system.
+    if (scopedProblemId) {
+      await tx.billingCode.updateMany({
+        where: { problemId: scopedProblemId, codeType: data.codeType },
+        data: { isSelected: false },
+      });
+    } else if (scopedOrderId) {
+      await tx.billingCode.updateMany({
+        where: { orderId: scopedOrderId, codeType: data.codeType },
+        data: { isSelected: false },
+      });
+    } else {
+      // Visit-level: deselect siblings (problemId=null AND orderId=null AND same soapNoteId).
+      await tx.billingCode.updateMany({
+        where: {
+          soapNoteId: parentSoapNoteId,
+          problemId: null,
+          orderId: null,
+          codeType: data.codeType,
+        },
+        data: { isSelected: false },
+      });
+    }
     return tx.billingCode.create({
       data: {
-        soapNoteId: problem.soapNoteId,
+        soapNoteId: parentSoapNoteId,
         hospitalId,
-        patientId: problem.patientId,
-        problemId: problem.id,
+        patientId: parentPatientId,
+        problemId: scopedProblemId,
+        orderId: scopedOrderId,
         codeType: data.codeType,
         code,
         description,
+        tariffNgn: data.tariffNgn ?? null,
         isSelected: true,
         source: 'DOCTOR_ADDED',
       },

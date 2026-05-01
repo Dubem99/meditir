@@ -20,6 +20,8 @@ router.delete('/problems/:id', requireRole(Role.DOCTOR), asyncHandler(controller
 router.patch('/orders/:id', requireRole(Role.DOCTOR), asyncHandler(controller.patchOrder));
 router.delete('/orders/:id', requireRole(Role.DOCTOR), asyncHandler(controller.removeOrder));
 
+router.get('/nhia-catalog', requireRole(Role.DOCTOR, Role.HOSPITAL_ADMIN), asyncHandler(controller.getNhiaCatalog));
+
 router.post('/billing-codes', requireRole(Role.DOCTOR), asyncHandler(controller.createBillingCode));
 router.patch('/billing-codes/:id', requireRole(Role.DOCTOR), asyncHandler(controller.patchBillingCode));
 router.delete('/billing-codes/:id', requireRole(Role.DOCTOR), asyncHandler(controller.removeBillingCode));

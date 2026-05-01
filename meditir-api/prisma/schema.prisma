@@ -495,6 +495,8 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  billingCodes BillingCode[]
+
   @@index([soapNoteId])
   @@index([patientId])
   @@index([hospitalId])
@@ -511,9 +513,13 @@ model BillingCode {
   problemId  String?
   problem    Problem? @relation(fields: [problemId], references: [id], onDelete: Cascade)
 
+  orderId    String?
+  order      Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
   codeType    String // ICD10 | SNOMED | CPT | NHIA
   code        String
   description String
+  tariffNgn   Int?     // Naira amount when codeType=NHIA
   isSelected  Boolean  @default(false)
 
   source    String   @default("AI_EXTRACTED")
@@ -523,6 +529,7 @@ model BillingCode {
   @@index([soapNoteId])
   @@index([hospitalId])
   @@index([problemId, codeType])
+  @@index([orderId, codeType])
   @@map("billing_codes")
 }
 

@@ -53,6 +53,10 @@ export const createBillingCode = async (req: Request, res: Response): Promise<vo
   res.status(201).json({ status: 'success', data: c });
 };
 
+export const getNhiaCatalog = async (_req: Request, res: Response): Promise<void> => {
+  res.json({ status: 'success', data: service.getNhiaCatalog() });
+};
+
 export const createProblem = async (req: Request, res: Response): Promise<void> => {
   const { soapNoteId, ...data } = req.body;
   const p = await service.addProblem(soapNoteId, hospitalId(req), data);

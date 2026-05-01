@@ -167,6 +167,14 @@ export interface Order {
   status: OrderStatus;
   source: ExtractionSource;
   createdAt: string;
+  billingCodes?: BillingCode[];
+}
+
+export interface NhiaTariffEntry {
+  code: string;
+  description: string;
+  tariffNgn: number | null;
+  section: string;
 }
 
 export type CodeSystem = 'ICD10' | 'SNOMED' | 'CPT' | 'NHIA';
@@ -175,9 +183,11 @@ export interface BillingCode {
   id: string;
   soapNoteId: string;
   problemId?: string | null;
+  orderId?: string | null;
   codeType: CodeSystem;
   code: string;
   description: string;
+  tariffNgn?: number | null;
   isSelected: boolean;
   source: ExtractionSource;
   createdAt: string;
