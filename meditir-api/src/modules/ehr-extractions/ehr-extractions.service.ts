@@ -7,6 +7,13 @@ import { logger } from '../../utils/logger';
 
 const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
+const CodeCandidateSchema = z.object({
+  codeType: z.enum(['ICD10', 'SNOMED']),
+  code: z.string().min(1),
+  description: z.string().min(1),
+  isSelected: z.boolean().default(false),
+});
+
 const ExtractionSchema = z.object({
   problems: z.array(
     z.object({
@@ -14,6 +21,7 @@ const ExtractionSchema = z.object({
       icd10Code: z.string().optional().nullable(),
       status: z.enum(['ACTIVE', 'RESOLVED', 'CHRONIC', 'RULE_OUT']).default('ACTIVE'),
       notes: z.string().optional().nullable(),
+      codes: z.array(CodeCandidateSchema).default([]),
     })
   ).default([]),
   orders: z.array(
@@ -28,7 +36,7 @@ const ExtractionSchema = z.object({
   ).default([]),
   billingCodes: z.array(
     z.object({
-      codeType: z.enum(['ICD10', 'CPT']),
+      codeType: z.enum(['CPT']),
       code: z.string().min(1),
       description: z.string().min(1),
     })
@@ -41,8 +49,14 @@ const EXTRACTION_SYSTEM_PROMPT = `You are a clinical coding and EHR extraction a
 Given a finalized SOAP note, extract three structured lists:
 
 1. PROBLEMS — distinct clinical problems / diagnoses / differentials mentioned in the Assessment.
-   - Include ICD-10 code when confident. Use null if unsure.
    - status: ACTIVE (current), CHRONIC (long-standing), RESOLVED (already cleared), RULE_OUT (differential being excluded).
+   - icd10Code: your single best ICD-10 pick (kept for back-compat). Use null if unsure.
+   - codes: an array of 2-4 coding candidates the clinician can pick from, drawing from BOTH:
+     * ICD10 — emit 1-2 plausible ICD-10 codes (most-likely first)
+     * SNOMED — emit 1-2 SNOMED CT concept IDs that match the diagnosis (numeric IDs, e.g., "41582007")
+   - For each Problem, mark exactly ONE code as isSelected=true per code system (your best guess).
+     Mark the rest as isSelected=false (alternatives the clinician may switch to).
+   - Only emit codes you are highly confident about. If unsure of the SNOMED ID, omit it rather than guess.
 
 2. ORDERS — actionable items in the Plan. One order per discrete action.
    - type: MEDICATION | LAB | IMAGING | PROCEDURE | REFERRAL
@@ -50,8 +64,8 @@ Given a finalized SOAP note, extract three structured lists:
    - For LAB/IMAGING: the test name (e.g., "FBC", "Chest X-ray").
    - For REFERRAL: specialty or facility.
 
-3. BILLING CODES — ICD-10 codes for the primary diagnoses and CPT codes for procedures/visit-level services.
-   - Include the short description for each code.
+3. BILLING CODES — visit-level CPT codes only (E&M codes, procedure codes not tied to a single diagnosis).
+   - Diagnosis-level codes belong in PROBLEMS.codes, not here.
    - Only emit codes you are confident about.
 
 Rules:
@@ -61,9 +75,20 @@ Rules:
 
 JSON format:
 {
-  "problems": [{"name": "...", "icd10Code": "J45.9", "status": "ACTIVE", "notes": null}],
-  "orders": [{"type": "MEDICATION", "name": "Salbutamol inhaler", "dosage": "100mcg", "frequency": "2 puffs PRN", "duration": "30 days", "instructions": null}],
-  "billingCodes": [{"codeType": "ICD10", "code": "J45.9", "description": "Asthma, unspecified"}]
+  "problems": [{
+    "name": "Streptococcal tonsillitis",
+    "icd10Code": "J03.0",
+    "status": "ACTIVE",
+    "notes": null,
+    "codes": [
+      {"codeType": "ICD10", "code": "J03.0", "description": "Streptococcal tonsillitis", "isSelected": true},
+      {"codeType": "ICD10", "code": "J30.1", "description": "Allergic rhinitis due to pollen", "isSelected": false},
+      {"codeType": "SNOMED", "code": "41582007", "description": "Streptococcal tonsillitis", "isSelected": true},
+      {"codeType": "SNOMED", "code": "90979004", "description": "Chronic tonsillitis", "isSelected": false}
+    ]
+  }],
+  "orders": [{"type": "MEDICATION", "name": "Amoxicillin", "dosage": "500mg", "frequency": "TDS", "duration": "7 days", "instructions": null}],
+  "billingCodes": [{"codeType": "CPT", "code": "99213", "description": "Office visit, established patient, low complexity"}]
 }`;
 
 const stripFence = (s: string) =>
@@ -93,13 +118,19 @@ export const extractFromSOAPNote = async (soapNoteId: string): Promise<Extractio
 
   await prisma.$transaction(async (tx) => {
     // Wipe prior AI-extracted rows so re-runs don't duplicate. Keep doctor-added.
+    // BillingCodes are cascade-deleted with their parent Problem, so deleting
+    // AI-extracted Problems clears their candidate codes automatically.
     await tx.problem.deleteMany({ where: { soapNoteId, source: 'AI_EXTRACTED' } });
     await tx.order.deleteMany({ where: { soapNoteId, source: 'AI_EXTRACTED' } });
-    await tx.billingCode.deleteMany({ where: { soapNoteId, source: 'AI_EXTRACTED' } });
+    // Wipe visit-level (problemId=null) AI billing codes — diagnosis codes
+    // were already wiped via the Problem cascade above.
+    await tx.billingCode.deleteMany({
+      where: { soapNoteId, source: 'AI_EXTRACTED', problemId: null },
+    });
 
-    if (parsed.problems.length > 0) {
-      await tx.problem.createMany({
-        data: parsed.problems.map((p) => ({
+    for (const p of parsed.problems) {
+      await tx.problem.create({
+        data: {
           soapNoteId,
           hospitalId: note.hospitalId,
           patientId: note.patientId,
@@ -107,7 +138,18 @@ export const extractFromSOAPNote = async (soapNoteId: string): Promise<Extractio
           icd10Code: p.icd10Code ?? null,
           status: p.status,
           notes: p.notes ?? null,
-        })),
+          billingCodes: {
+            create: p.codes.map((c) => ({
+              soapNoteId,
+              hospitalId: note.hospitalId,
+              patientId: note.patientId,
+              codeType: c.codeType,
+              code: c.code,
+              description: c.description,
+              isSelected: c.isSelected,
+            })),
+          },
+        },
       });
     }
 
@@ -150,13 +192,20 @@ export const getExtractionsForSession = async (sessionId: string, hospitalId: st
     throw new AppError('SOAP note not found', 404);
   }
 
-  const [problems, orders, billingCodes] = await Promise.all([
-    prisma.problem.findMany({ where: { soapNoteId: note.id }, orderBy: { createdAt: 'asc' } }),
+  const [problems, orders, visitLevelCodes] = await Promise.all([
+    prisma.problem.findMany({
+      where: { soapNoteId: note.id },
+      orderBy: { createdAt: 'asc' },
+      include: { billingCodes: { orderBy: { createdAt: 'asc' } } },
+    }),
     prisma.order.findMany({ where: { soapNoteId: note.id }, orderBy: { createdAt: 'asc' } }),
-    prisma.billingCode.findMany({ where: { soapNoteId: note.id }, orderBy: { createdAt: 'asc' } }),
+    prisma.billingCode.findMany({
+      where: { soapNoteId: note.id, problemId: null },
+      orderBy: { createdAt: 'asc' },
+    }),
   ]);
 
-  return { soapNoteId: note.id, problems, orders, billingCodes };
+  return { soapNoteId: note.id, problems, orders, billingCodes: visitLevelCodes };
 };
 
 export const updateProblem = async (
@@ -208,6 +257,35 @@ export const deleteBillingCode = async (id: string, hospitalId: string) => {
   const existing = await prisma.billingCode.findFirst({ where: { id, hospitalId } });
   if (!existing) throw new AppError('Billing code not found', 404);
   await prisma.billingCode.delete({ where: { id } });
+};
+
+// Toggle isSelected on a candidate code. When selecting, atomically deselect
+// siblings — same Problem + same code system — so each system has at most one
+// selection per Problem. Visit-level codes (problemId=null) are independent.
+export const selectBillingCode = async (
+  id: string,
+  hospitalId: string,
+  isSelected: boolean
+) => {
+  const existing = await prisma.billingCode.findFirst({ where: { id, hospitalId } });
+  if (!existing) throw new AppError('Billing code not found', 404);
+
+  return prisma.$transaction(async (tx) => {
+    if (isSelected && existing.problemId) {
+      await tx.billingCode.updateMany({
+        where: {
+          problemId: existing.problemId,
+          codeType: existing.codeType,
+          id: { not: id },
+        },
+        data: { isSelected: false },
+      });
+    }
+    return tx.billingCode.update({
+      where: { id },
+      data: { isSelected, source: 'DOCTOR_EDITED' },
+    });
+  });
 };
 
 export const addProblem = async (

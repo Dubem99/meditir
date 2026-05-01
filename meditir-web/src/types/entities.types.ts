@@ -152,6 +152,7 @@ export interface Problem {
   notes?: string | null;
   source: ExtractionSource;
   createdAt: string;
+  billingCodes?: BillingCode[];
 }
 
 export interface Order {
@@ -168,12 +169,16 @@ export interface Order {
   createdAt: string;
 }
 
+export type CodeSystem = 'ICD10' | 'SNOMED' | 'CPT' | 'NHIA';
+
 export interface BillingCode {
   id: string;
   soapNoteId: string;
-  codeType: 'ICD10' | 'CPT';
+  problemId?: string | null;
+  codeType: CodeSystem;
   code: string;
   description: string;
+  isSelected: boolean;
   source: ExtractionSource;
   createdAt: string;
 }

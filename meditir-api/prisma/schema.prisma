@@ -468,6 +468,8 @@ model Problem {
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
+  billingCodes BillingCode[]
+
   @@index([soapNoteId])
   @@index([patientId])
   @@index([hospitalId])
@@ -506,9 +508,13 @@ model BillingCode {
   hospitalId String
   patientId  String
 
-  codeType    String // ICD10 | CPT
+  problemId  String?
+  problem    Problem? @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  codeType    String // ICD10 | SNOMED | CPT | NHIA
   code        String
   description String
+  isSelected  Boolean  @default(false)
 
   source    String   @default("AI_EXTRACTED")
   createdAt DateTime @default(now())
@@ -516,6 +522,7 @@ model BillingCode {
 
   @@index([soapNoteId])
   @@index([hospitalId])
+  @@index([problemId, codeType])
   @@map("billing_codes")
 }
 

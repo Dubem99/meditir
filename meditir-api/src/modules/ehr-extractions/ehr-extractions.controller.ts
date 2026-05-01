@@ -39,6 +39,15 @@ export const removeBillingCode = async (req: Request, res: Response): Promise<vo
   res.json({ status: 'success' });
 };
 
+export const patchBillingCode = async (req: Request, res: Response): Promise<void> => {
+  const c = await service.selectBillingCode(
+    param(req, 'id'),
+    hospitalId(req),
+    Boolean(req.body?.isSelected)
+  );
+  res.json({ status: 'success', data: c });
+};
+
 export const createProblem = async (req: Request, res: Response): Promise<void> => {
   const { soapNoteId, ...data } = req.body;
   const p = await service.addProblem(soapNoteId, hospitalId(req), data);

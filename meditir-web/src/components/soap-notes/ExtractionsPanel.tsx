@@ -7,6 +7,7 @@ import type {
   Problem,
   Order,
   BillingCode,
+  CodeSystem,
   ProblemStatus,
   OrderStatus,
 } from '@/types/entities.types';
@@ -105,6 +106,91 @@ const SectionHeader = ({
   </div>
 );
 
+// ─────────── Code picker (per-Problem) ───────────
+
+const codeSystemMeta: Partial<Record<CodeSystem, { label: string }>> = {
+  ICD10: { label: 'ICD-10' },
+  SNOMED: { label: 'SNOMED' },
+  NHIA: { label: 'NHIA' },
+};
+
+const PICKER_SYSTEMS: CodeSystem[] = ['ICD10', 'SNOMED'];
+
+const CodePicker = ({
+  problem,
+  busyId,
+  readOnly,
+  onSelect,
+}: {
+  problem: Problem;
+  busyId: string | null;
+  readOnly?: boolean;
+  onSelect: (problemId: string, codeId: string, codeType: CodeSystem) => void;
+}) => {
+  const codes = problem.billingCodes ?? [];
+  if (codes.length === 0) return null;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+      {PICKER_SYSTEMS.map((system) => {
+        const systemCodes = codes.filter((c) => c.codeType === system);
+        if (systemCodes.length === 0) return null;
+        const meta = codeSystemMeta[system];
+        return (
+          <div key={system} className="flex items-start gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mt-1.5 w-14 shrink-0">
+              {meta?.label}
+            </span>
+            <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+              {systemCodes.map((c) => {
+                const selected = c.isSelected;
+                const disabled = readOnly || busyId === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => !disabled && !selected && onSelect(problem.id, c.id, system)}
+                    disabled={disabled || selected}
+                    title={c.description}
+                    className={[
+                      'group inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 transition-colors',
+                      selected
+                        ? 'bg-emerald-50 border-emerald-200 cursor-default'
+                        : 'bg-white border-gray-200 hover:border-emerald-200 hover:bg-emerald-50/40 cursor-pointer',
+                      disabled && !selected ? 'opacity-50 cursor-not-allowed' : '',
+                    ].join(' ')}
+                  >
+                    <span
+                      className={[
+                        'font-mono text-[11px] font-semibold',
+                        selected ? 'text-emerald-800' : 'text-gray-700',
+                      ].join(' ')}
+                    >
+                      {c.code}
+                    </span>
+                    <span
+                      className={[
+                        'text-[11px] truncate max-w-[200px]',
+                        selected ? 'text-emerald-700' : 'text-gray-500',
+                      ].join(' ')}
+                    >
+                      {c.description}
+                    </span>
+                    {selected && (
+                      <svg className="h-3 w-3 text-emerald-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // ─────────── Main component ───────────
 
 export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }: Props) => {
@@ -169,6 +255,28 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
       onChange({ ...extractions, billingCodes: extractions.billingCodes.filter((c) => c.id !== id) });
     } catch (err) {
       setActionError(describeError(err, 'Remove billing code'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const selectCode = async (problemId: string, codeId: string, codeType: CodeSystem) => {
+    setBusyId(codeId);
+    setActionError(null);
+    try {
+      await api.patch(`/ehr-extractions/billing-codes/${codeId}`, { isSelected: true });
+      onChange({
+        ...extractions,
+        problems: extractions.problems.map((p) => {
+          if (p.id !== problemId) return p;
+          const codes = (p.billingCodes ?? []).map((c) =>
+            c.codeType === codeType ? { ...c, isSelected: c.id === codeId } : c
+          );
+          return { ...p, billingCodes: codes };
+        }),
+      });
+    } catch (err) {
+      setActionError(describeError(err, 'Select code'));
     } finally {
       setBusyId(null);
     }
@@ -251,44 +359,47 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
               return (
                 <div
                   key={p.id}
-                  className="flex items-start gap-3 border border-gray-200 rounded-xl p-3 bg-white hover:border-gray-300 transition-colors"
+                  className="border border-gray-200 rounded-xl p-3 bg-white hover:border-gray-300 transition-colors"
                 >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 break-words">{p.name}</p>
-                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider rounded-full px-2 py-0.5 ${style.pill}`}>
-                        {style.label}
-                      </span>
-                      {p.icd10Code && (
-                        <span className="font-mono text-[10px] text-gray-500 bg-gray-50 border border-gray-100 rounded px-1.5 py-0.5">
-                          {p.icd10Code}
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 break-words">{p.name}</p>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider rounded-full px-2 py-0.5 ${style.pill}`}>
+                          {style.label}
                         </span>
-                      )}
+                      </div>
                     </div>
+                    {!readOnly && (
+                      <div className="flex items-center gap-1 shrink-0 print:hidden">
+                        <select
+                          value={p.status}
+                          onChange={(e) => updateProblemStatus(p, e.target.value as ProblemStatus)}
+                          disabled={busyId === p.id}
+                          className="text-[10px] bg-white border border-gray-200 rounded-lg px-1.5 py-1 cursor-pointer outline-none hover:border-gray-300"
+                        >
+                          <option value="ACTIVE">Active</option>
+                          <option value="CHRONIC">Chronic</option>
+                          <option value="RESOLVED">Resolved</option>
+                          <option value="RULE_OUT">R/O</option>
+                        </select>
+                        <button
+                          onClick={() => removeProblem(p.id)}
+                          disabled={busyId === p.id}
+                          className="text-gray-300 hover:text-red-500 text-xl leading-none transition-colors w-6 h-6 flex items-center justify-center"
+                          aria-label="Remove"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {!readOnly && (
-                    <div className="flex items-center gap-1 shrink-0 print:hidden">
-                      <select
-                        value={p.status}
-                        onChange={(e) => updateProblemStatus(p, e.target.value as ProblemStatus)}
-                        disabled={busyId === p.id}
-                        className="text-[10px] bg-white border border-gray-200 rounded-lg px-1.5 py-1 cursor-pointer outline-none hover:border-gray-300"
-                      >
-                        <option value="ACTIVE">Active</option>
-                        <option value="CHRONIC">Chronic</option>
-                        <option value="RESOLVED">Resolved</option>
-                        <option value="RULE_OUT">R/O</option>
-                      </select>
-                      <button
-                        onClick={() => removeProblem(p.id)}
-                        disabled={busyId === p.id}
-                        className="text-gray-300 hover:text-red-500 text-xl leading-none transition-colors w-6 h-6 flex items-center justify-center"
-                        aria-label="Remove"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  )}
+                  <CodePicker
+                    problem={p}
+                    busyId={busyId}
+                    readOnly={readOnly}
+                    onSelect={selectCode}
+                  />
                 </div>
               );
             })}
@@ -455,7 +566,7 @@ export const ExtractionsPanel = ({ sessionId, extractions, onChange, readOnly }:
               <span className="text-gray-500"><CodeIcon /></span>
             </div>
             <span className="text-sm font-semibold text-gray-700 group-hover:text-gray-900">
-              Billing codes
+              Visit-level codes
             </span>
             <span className="text-xs font-medium text-gray-400 bg-gray-100 rounded-full px-2 py-0.5 tabular-nums">
               {extractions.billingCodes.length}
