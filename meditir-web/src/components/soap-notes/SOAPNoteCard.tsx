@@ -17,6 +17,8 @@ const SECTIONS = [
   { key: 'plan', label: 'P — Plan', description: 'Treatment & follow-up plan' },
 ] as const;
 
+type TransferState = 'idle' | 'transferring' | 'sent' | 'error';
+
 export const SOAPNoteCard = ({ note, showActions, onFinalize }: Props) => {
   const [editing, setEditing] = useState<string | null>(null);
   const [values, setValues] = useState({
@@ -27,6 +29,31 @@ export const SOAPNoteCard = ({ note, showActions, onFinalize }: Props) => {
   });
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [transferState, setTransferState] = useState<TransferState>('idle');
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferTarget, setTransferTarget] = useState<string | null>(null);
+
+  const handleTransfer = async () => {
+    setTransferState('transferring');
+    setTransferError(null);
+    try {
+      const res = await api.post(`/soap-notes/${note.id}/transfer`);
+      setTransferTarget(res.data.data?.transferredTo ?? null);
+      setTransferState('sent');
+      setTimeout(() => setTransferState('idle'), 4000);
+    } catch (err) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      setTransferError(e?.response?.data?.message || e?.message || 'Transfer failed');
+      setTransferState('error');
+      setTimeout(() => setTransferState('idle'), 6000);
+    }
+  };
+
+  const handleDownloadPdf = () => {
+    // Browser's "Save as PDF" via the print dialog — the print stylesheet
+    // already hides action buttons via `print:hidden` on the relevant elements.
+    if (typeof window !== 'undefined') window.print();
+  };
 
   const handleSave = async (key: string) => {
     setSaving(true);
@@ -157,11 +184,78 @@ export const SOAPNoteCard = ({ note, showActions, onFinalize }: Props) => {
       )}
 
       {note.status === 'FINALIZED' && note.doctorSignedAt && (
-        <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Signed on {new Date(note.doctorSignedAt).toLocaleDateString('en-NG', { dateStyle: 'long' })}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Signed on {new Date(note.doctorSignedAt).toLocaleDateString('en-NG', { dateStyle: 'long' })}
+          </div>
+
+          {showActions && (
+            <div className="flex flex-wrap items-center gap-2 print:hidden">
+              <button
+                onClick={handleTransfer}
+                disabled={transferState === 'transferring' || transferState === 'sent'}
+                className={[
+                  'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors',
+                  transferState === 'sent'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-default'
+                    : transferState === 'error'
+                    ? 'bg-red-50 text-red-700 border border-red-200'
+                    : 'bg-primary-600 hover:bg-primary-700 text-white disabled:opacity-60',
+                ].join(' ')}
+              >
+                {transferState === 'transferring' && (
+                  <>
+                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.3" />
+                      <path d="M12 2a10 10 0 0110 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                    </svg>
+                    Transferring note…
+                  </>
+                )}
+                {transferState === 'sent' && (
+                  <>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    {transferTarget ? `Sent to ${transferTarget}` : 'Sent to records'}
+                  </>
+                )}
+                {transferState === 'error' && (
+                  <>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z" />
+                    </svg>
+                    Transfer failed — retry
+                  </>
+                )}
+                {transferState === 'idle' && (
+                  <>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                    </svg>
+                    Transfer to records
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={handleDownloadPdf}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:border-gray-300 transition-colors"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 12V4m0 8l-4-4m4 4l4-4" />
+                </svg>
+                Download PDF
+              </button>
+
+              {transferState === 'error' && transferError && (
+                <p className="w-full text-xs text-red-600 mt-1">{transferError}</p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

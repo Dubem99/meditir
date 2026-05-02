@@ -33,6 +33,16 @@ export const finalize = async (req: Request, res: Response): Promise<void> => {
   res.json({ status: 'success', data: note });
 };
 
+export const transfer = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new AppError('Authentication required', 401);
+  const result = await service.transferSoapNoteToRecords(
+    param(req, 'id'),
+    hospitalId(req),
+    req.user.id
+  );
+  res.json({ status: 'success', data: result });
+};
+
 export const getTTS = async (req: Request, res: Response): Promise<void> => {
   const noteId = param(req, 'id');
   const note = await service.getSOAPNote(noteId, hospitalId(req));

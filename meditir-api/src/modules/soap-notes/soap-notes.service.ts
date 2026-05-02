@@ -7,6 +7,7 @@ import { NoteStatus } from '../../types/enums';
 import { buildTranscriptText } from '../transcription/transcription.service';
 import { extractFromSOAPNote } from '../ehr-extractions/ehr-extractions.service';
 import { logger } from '../../utils/logger';
+import { sendSoapNoteToRecords } from '../../services/email.service';
 
 const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
@@ -286,4 +287,116 @@ export const finalizeSOAPNote = async (id: string, hospitalId: string, doctorUse
     });
     return updated;
   });
+};
+
+// Transfer the finalized SOAP note + EHR extractions + NHIA claim to the
+// hospital's records inbox. Hospital must have recordsEmail configured.
+export const transferSoapNoteToRecords = async (
+  id: string,
+  hospitalId: string,
+  doctorUserId: string
+) => {
+  const note = await prisma.sOAPNote.findFirst({
+    where: { id, hospitalId },
+    include: {
+      hospital: true,
+      patient: true,
+      session: { include: { doctor: true } },
+      problems: { include: { billingCodes: { orderBy: { createdAt: 'asc' } } } },
+      orders: { include: { billingCodes: { orderBy: { createdAt: 'asc' } } } },
+      billingCodes: { orderBy: { createdAt: 'asc' } },
+    },
+  });
+  if (!note) throw new AppError('SOAP note not found', 404);
+  if (note.status !== NoteStatus.FINALIZED) {
+    throw new AppError('Only finalized notes can be transferred', 400);
+  }
+  if (!note.hospital.recordsEmail) {
+    throw new AppError(
+      'No records inbox configured for this hospital. Set Hospital.recordsEmail first.',
+      400
+    );
+  }
+
+  const visitNhia = note.billingCodes.find(
+    (c) => c.codeType === 'NHIA' && c.problemId === null && c.orderId === null && c.isSelected
+  );
+
+  const claimTotal = [
+    visitNhia?.tariffNgn ?? 0,
+    ...note.orders.flatMap((o) =>
+      o.billingCodes
+        .filter((c) => c.codeType === 'NHIA' && c.isSelected)
+        .map((c) => c.tariffNgn ?? 0)
+    ),
+  ].reduce((a, b) => a + b, 0);
+
+  const problemsForEmail = note.problems.map((p) => ({
+    name: p.name,
+    status: p.status,
+    icd10Code:
+      p.billingCodes.find((c) => c.codeType === 'ICD10' && c.isSelected)?.code ??
+      p.icd10Code ??
+      null,
+    snomedCode:
+      p.billingCodes.find((c) => c.codeType === 'SNOMED' && c.isSelected)?.code ?? null,
+  }));
+
+  const ordersForEmail = note.orders.map((o) => {
+    const nhia = o.billingCodes.find((c) => c.codeType === 'NHIA' && c.isSelected);
+    return {
+      type: o.type,
+      name: o.name,
+      dosage: o.dosage,
+      frequency: o.frequency,
+      duration: o.duration,
+      instructions: o.instructions,
+      nhiaCode: nhia?.code ?? null,
+      nhiaDescription: nhia?.description ?? null,
+      nhiaTariffNgn: nhia?.tariffNgn ?? null,
+    };
+  });
+
+  const visitDate = note.session?.startedAt
+    ? new Date(note.session.startedAt).toLocaleDateString('en-NG', { dateStyle: 'medium' })
+    : new Date(note.createdAt).toLocaleDateString('en-NG', { dateStyle: 'medium' });
+  const patientName = `${note.patient.firstName} ${note.patient.lastName}`;
+  const doctorName = note.session?.doctor
+    ? `Dr. ${note.session.doctor.firstName} ${note.session.doctor.lastName}`
+    : 'Treating clinician';
+
+  await sendSoapNoteToRecords({
+    recordsEmail: note.hospital.recordsEmail,
+    hospitalName: note.hospital.name,
+    patientName,
+    patientMrn: note.patient.medicalRecordNo,
+    patientDob: note.patient.dateOfBirth
+      ? new Date(note.patient.dateOfBirth).toLocaleDateString('en-NG', { dateStyle: 'medium' })
+      : null,
+    doctorName,
+    visitDate,
+    subjective: note.subjective,
+    objective: note.objective,
+    assessment: note.assessment,
+    plan: note.plan,
+    problems: problemsForEmail,
+    orders: ordersForEmail,
+    visitNhiaCode: visitNhia?.code ?? null,
+    visitNhiaDescription: visitNhia?.description ?? null,
+    visitNhiaTariffNgn: visitNhia?.tariffNgn ?? null,
+    claimTotalNgn: claimTotal > 0 ? claimTotal : null,
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: doctorUserId,
+      hospitalId,
+      action: 'TRANSFER_NOTE_TO_RECORDS',
+      resource: 'SOAPNote',
+      resourceId: id,
+      metadata: { recordsEmail: note.hospital.recordsEmail },
+    },
+  });
+
+  return { transferredTo: note.hospital.recordsEmail, transferredAt: new Date().toISOString() };
 };

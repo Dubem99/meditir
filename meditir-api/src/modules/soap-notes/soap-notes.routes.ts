@@ -17,6 +17,7 @@ router.get('/my-notes', requireRole(Role.PATIENT), asyncHandler(controller.listM
 router.get('/:id', requireRole(Role.DOCTOR, Role.PATIENT, Role.HOSPITAL_ADMIN), asyncHandler(controller.get));
 router.patch('/:id', requireRole(Role.DOCTOR), validate(UpdateSOAPSchema), asyncHandler(controller.update));
 router.post('/:id/finalize', requireRole(Role.DOCTOR), asyncHandler(controller.finalize));
+router.post('/:id/transfer', requireRole(Role.DOCTOR), asyncHandler(controller.transfer));
 router.get('/:id/tts', requireRole(Role.DOCTOR, Role.PATIENT), asyncHandler(controller.getTTS));
 
 export default router;

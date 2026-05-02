@@ -147,6 +147,9 @@ model Hospital {
   address   String?
   phone     String?
   email     String   @unique
+  // Optional inbox for the records department. When set, doctors can
+  // transfer finalized SOAP notes here via the "Transfer to records" flow.
+  recordsEmail String?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -27,8 +27,8 @@ export const sendOnboardingEmail = async ({
     return;
   }
 
-  const loginUrl = `${process.env.APP_URL || 'https://meditir.vercel.app'}/login`;
-  const appUrl = process.env.APP_URL || 'https://meditir.vercel.app';
+  const loginUrl = `${process.env.APP_URL || 'https://meditir.com'}/login`;
+  const appUrl = process.env.APP_URL || 'https://meditir.com';
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -277,7 +277,7 @@ export const sendDoctorOnboardingEmail = async ({
     return;
   }
 
-  const loginUrl = `${process.env.APP_URL || 'https://meditir.vercel.app'}/login`;
+  const loginUrl = `${process.env.APP_URL || 'https://meditir.com'}/login`;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -599,4 +599,202 @@ export const sendPatientSummaryEmail = async ({
     throw new Error(`Resend error: ${sendError.name || 'unknown'} — ${sendError.message || JSON.stringify(sendError)}`);
   }
   console.log(`[email] Patient summary email sent to ${patientEmail}, id=${sendData?.id}`);
+};
+
+// HTML-escape helper used by the records-transfer email so user-supplied
+// SOAP text and patient details can't break the email markup.
+const esc = (s: string | null | undefined): string =>
+  (s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+const formatNgnEmail = (n: number | null | undefined): string =>
+  n == null ? '' : `₦${n.toLocaleString('en-NG')}`;
+
+interface RecordsTransferOrder {
+  type: string;
+  name: string;
+  dosage?: string | null;
+  frequency?: string | null;
+  duration?: string | null;
+  instructions?: string | null;
+  nhiaCode?: string | null;
+  nhiaDescription?: string | null;
+  nhiaTariffNgn?: number | null;
+}
+
+interface RecordsTransferProblem {
+  name: string;
+  status: string;
+  icd10Code?: string | null;
+  snomedCode?: string | null;
+}
+
+export const sendSoapNoteToRecords = async ({
+  recordsEmail,
+  hospitalName,
+  patientName,
+  patientMrn,
+  patientDob,
+  doctorName,
+  visitDate,
+  subjective,
+  objective,
+  assessment,
+  plan,
+  problems,
+  orders,
+  visitNhiaCode,
+  visitNhiaDescription,
+  visitNhiaTariffNgn,
+  claimTotalNgn,
+}: {
+  recordsEmail: string;
+  hospitalName: string;
+  patientName: string;
+  patientMrn?: string | null;
+  patientDob?: string | null;
+  doctorName: string;
+  visitDate: string;
+  subjective: string;
+  objective: string;
+  assessment: string;
+  plan: string;
+  problems: RecordsTransferProblem[];
+  orders: RecordsTransferOrder[];
+  visitNhiaCode?: string | null;
+  visitNhiaDescription?: string | null;
+  visitNhiaTariffNgn?: number | null;
+  claimTotalNgn?: number | null;
+}) => {
+  const resend = getResend();
+  if (!resend) {
+    console.warn('[email] RESEND_API_KEY not set — skipping records transfer email');
+    return;
+  }
+
+  const subject = `Clinical note — ${patientName} (${visitDate}) — ${hospitalName}`;
+
+  const problemsHtml = problems.length
+    ? `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:8px;">
+         ${problems
+           .map(
+             (p) => `<tr>
+               <td style="padding:8px 0;border-bottom:1px solid #eef2f1;font-size:13px;">
+                 <strong>${esc(p.name)}</strong>
+                 <span style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;margin-left:6px;">${esc(p.status)}</span>
+                 ${p.icd10Code ? `<div style="color:#6b7280;font-size:12px;font-family:monospace;">ICD-10: ${esc(p.icd10Code)}</div>` : ''}
+                 ${p.snomedCode ? `<div style="color:#6b7280;font-size:12px;font-family:monospace;">SNOMED: ${esc(p.snomedCode)}</div>` : ''}
+               </td>
+             </tr>`
+           )
+           .join('')}
+       </table>`
+    : '<p style="color:#9ca3af;font-size:13px;font-style:italic;margin:6px 0 0;">No diagnoses recorded.</p>';
+
+  const ordersHtml = orders.length
+    ? `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:8px;">
+         ${orders
+           .map(
+             (o) => `<tr>
+               <td style="padding:8px 0;border-bottom:1px solid #eef2f1;font-size:13px;">
+                 <span style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">${esc(o.type)}</span>
+                 <strong style="margin-left:6px;">${esc(o.name)}</strong>
+                 ${o.dosage ? `<div style="color:#374151;font-size:12px;">${esc(o.dosage)}${o.frequency ? ` · ${esc(o.frequency)}` : ''}${o.duration ? ` · for ${esc(o.duration)}` : ''}</div>` : ''}
+                 ${o.instructions ? `<div style="color:#6b7280;font-size:12px;font-style:italic;">${esc(o.instructions)}</div>` : ''}
+                 ${o.nhiaCode ? `<div style="color:#92400e;font-size:12px;font-family:monospace;margin-top:2px;">NHIA ${esc(o.nhiaCode)} — ${esc(o.nhiaDescription)}${o.nhiaTariffNgn != null ? ` · ${formatNgnEmail(o.nhiaTariffNgn)}` : ''}</div>` : ''}
+               </td>
+             </tr>`
+           )
+           .join('')}
+       </table>`
+    : '<p style="color:#9ca3af;font-size:13px;font-style:italic;margin:6px 0 0;">No orders.</p>';
+
+  const visitNhiaHtml = visitNhiaCode
+    ? `<div style="margin-top:6px;color:#92400e;font-size:12px;font-family:monospace;">Consultation: ${esc(visitNhiaCode)} — ${esc(visitNhiaDescription)}${visitNhiaTariffNgn != null ? ` · ${formatNgnEmail(visitNhiaTariffNgn)}` : ''}</div>`
+    : '';
+
+  const claimTotalHtml = claimTotalNgn != null && claimTotalNgn > 0
+    ? `<div style="margin-top:8px;padding:10px 14px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:13px;">
+         <strong>Claim total:</strong> ${formatNgnEmail(claimTotalNgn)}
+       </div>`
+    : '';
+
+  const soapBlock = (label: string, body: string) => `
+    <div style="margin-bottom:18px;">
+      <p style="color:#0f766e;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin:0 0 4px;">${label}</p>
+      <div style="color:#1f2937;font-size:13px;line-height:1.6;white-space:pre-wrap;">${esc(body)}</div>
+    </div>`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${esc(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Inter,system-ui,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.05);">
+          <tr>
+            <td style="background:#030c0b;padding:24px 32px;">
+              <p style="color:#4db0a8;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin:0 0 6px;">Clinical Note Transfer</p>
+              <h1 style="color:#ffffff;font-size:20px;font-weight:700;margin:0;">${esc(patientName)}</h1>
+              <p style="color:#6b8f8d;font-size:13px;margin:8px 0 0;">
+                Visit ${esc(visitDate)} · Seen by ${esc(doctorName)}${patientMrn ? ` · MRN ${esc(patientMrn)}` : ''}${patientDob ? ` · DOB ${esc(patientDob)}` : ''}
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 32px;">
+              ${soapBlock('Subjective', subjective)}
+              ${soapBlock('Objective', objective)}
+              ${soapBlock('Assessment', assessment)}
+              ${soapBlock('Plan', plan)}
+
+              <div style="margin-top:24px;padding-top:20px;border-top:1px solid #e5e7eb;">
+                <p style="color:#0f766e;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin:0 0 4px;">Diagnoses</p>
+                ${problemsHtml}
+              </div>
+
+              <div style="margin-top:18px;">
+                <p style="color:#0f766e;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin:0 0 4px;">Orders</p>
+                ${ordersHtml}
+              </div>
+
+              ${visitNhiaCode || claimTotalHtml ? `<div style="margin-top:18px;padding-top:18px;border-top:1px solid #e5e7eb;">
+                <p style="color:#0f766e;font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin:0 0 4px;">NHIA billing</p>
+                ${visitNhiaHtml}
+                ${claimTotalHtml}
+              </div>` : ''}
+
+              <p style="color:#9ca3af;font-size:11px;margin:24px 0 0;">
+                Transferred via Meditir · ${esc(hospitalName)}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  console.log(`[email] sendSoapNoteToRecords called for ${recordsEmail}`);
+  const { data: sendData, error: sendError } = await resend.emails.send({
+    from: FROM,
+    to: recordsEmail,
+    subject,
+    html,
+  });
+  if (sendError) {
+    console.error('[email] Resend rejected records transfer email:', JSON.stringify(sendError));
+    throw new Error(`Resend error: ${sendError.name || 'unknown'} — ${sendError.message || JSON.stringify(sendError)}`);
+  }
+  console.log(`[email] Records transfer email sent to ${recordsEmail}, id=${sendData?.id}`);
 };
