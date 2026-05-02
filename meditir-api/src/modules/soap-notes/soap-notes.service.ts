@@ -8,6 +8,7 @@ import { buildTranscriptText } from '../transcription/transcription.service';
 import { extractFromSOAPNote } from '../ehr-extractions/ehr-extractions.service';
 import { logger } from '../../utils/logger';
 import { sendSoapNoteToRecords } from '../../services/email.service';
+import { logCorrection, isMeaningfulChange } from '../../services/corrections.service';
 
 const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
@@ -248,6 +249,32 @@ export const updateSOAPNote = async (
   });
   if (session?.doctor.userId !== doctorUserId) {
     throw new AppError('Only the session doctor can edit this note', 403);
+  }
+
+  // Capture per-section diffs as correction signal before writing.
+  const sections: Array<keyof typeof data> = ['subjective', 'objective', 'assessment', 'plan'];
+  for (const field of sections) {
+    const next = data[field];
+    if (next == null) continue;
+    const prev = note[field as 'subjective' | 'objective' | 'assessment' | 'plan'];
+    if (isMeaningfulChange(prev, next)) {
+      logCorrection({
+        hospitalId,
+        doctorUserId,
+        artifactType: 'SOAP_SECTION',
+        artifactId: note.id,
+        correctionKind: 'EDIT',
+        field,
+        aiValue: prev,
+        doctorValue: next,
+        soapNoteId: note.id,
+        metadata: {
+          aiModel: note.aiModel,
+          promptVersion: note.promptVersion,
+          previousStatus: note.status,
+        },
+      });
+    }
   }
 
   return prisma.sOAPNote.update({

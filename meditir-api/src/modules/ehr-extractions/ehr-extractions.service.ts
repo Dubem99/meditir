@@ -5,6 +5,7 @@ import { config } from '../../config';
 import { AppError } from '../../utils/AppError';
 import { logger } from '../../utils/logger';
 import { NHIA_TARIFF_PRIMARY_CARE } from '../../data/nhia-tariff';
+import { logCorrection, isMeaningfulChange } from '../../services/corrections.service';
 
 const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
@@ -296,10 +297,35 @@ export const getExtractionsForSession = async (sessionId: string, hospitalId: st
 export const updateProblem = async (
   id: string,
   hospitalId: string,
-  data: { name?: string; icd10Code?: string | null; status?: 'ACTIVE' | 'RESOLVED' | 'CHRONIC' | 'RULE_OUT'; notes?: string | null }
+  data: { name?: string; icd10Code?: string | null; status?: 'ACTIVE' | 'RESOLVED' | 'CHRONIC' | 'RULE_OUT'; notes?: string | null },
+  doctorUserId?: string
 ) => {
   const existing = await prisma.problem.findFirst({ where: { id, hospitalId } });
   if (!existing) throw new AppError('Problem not found', 404);
+
+  // Per-field correction events for any actually-changed AI field.
+  const fields: Array<keyof typeof data> = ['name', 'icd10Code', 'status', 'notes'];
+  for (const field of fields) {
+    if (data[field] === undefined) continue;
+    const prev = existing[field as keyof typeof existing] as unknown;
+    const next = data[field];
+    if (isMeaningfulChange(prev, next)) {
+      logCorrection({
+        hospitalId,
+        doctorUserId,
+        artifactType: 'PROBLEM',
+        artifactId: existing.id,
+        correctionKind: field === 'status' ? 'STATUS_CHANGE' : 'EDIT',
+        field,
+        aiValue: prev,
+        doctorValue: next,
+        soapNoteId: existing.soapNoteId,
+        problemId: existing.id,
+        metadata: { previousSource: existing.source },
+      });
+    }
+  }
+
   return prisma.problem.update({
     where: { id },
     data: { ...data, source: 'DOCTOR_EDITED' },
@@ -316,25 +342,73 @@ export const updateOrder = async (
     duration?: string | null;
     instructions?: string | null;
     status?: 'PENDING' | 'ORDERED' | 'COMPLETED' | 'CANCELLED';
-  }
+  },
+  doctorUserId?: string
 ) => {
   const existing = await prisma.order.findFirst({ where: { id, hospitalId } });
   if (!existing) throw new AppError('Order not found', 404);
+
+  const fields: Array<keyof typeof data> = ['name', 'dosage', 'frequency', 'duration', 'instructions', 'status'];
+  for (const field of fields) {
+    if (data[field] === undefined) continue;
+    const prev = existing[field as keyof typeof existing] as unknown;
+    const next = data[field];
+    if (isMeaningfulChange(prev, next)) {
+      logCorrection({
+        hospitalId,
+        doctorUserId,
+        artifactType: 'ORDER',
+        artifactId: existing.id,
+        correctionKind: field === 'status' ? 'STATUS_CHANGE' : 'EDIT',
+        field,
+        aiValue: prev,
+        doctorValue: next,
+        soapNoteId: existing.soapNoteId,
+        orderId: existing.id,
+        metadata: { previousSource: existing.source, type: existing.type },
+      });
+    }
+  }
+
   return prisma.order.update({
     where: { id },
     data: { ...data, source: 'DOCTOR_EDITED' },
   });
 };
 
-export const deleteProblem = async (id: string, hospitalId: string) => {
+export const deleteProblem = async (id: string, hospitalId: string, doctorUserId?: string) => {
   const existing = await prisma.problem.findFirst({ where: { id, hospitalId } });
   if (!existing) throw new AppError('Problem not found', 404);
+  if (existing.source === 'AI_EXTRACTED') {
+    logCorrection({
+      hospitalId,
+      doctorUserId,
+      artifactType: 'PROBLEM',
+      artifactId: existing.id,
+      correctionKind: 'REJECT_AI',
+      aiValue: { name: existing.name, icd10Code: existing.icd10Code, status: existing.status },
+      soapNoteId: existing.soapNoteId,
+      problemId: existing.id,
+    });
+  }
   await prisma.problem.delete({ where: { id } });
 };
 
-export const deleteOrder = async (id: string, hospitalId: string) => {
+export const deleteOrder = async (id: string, hospitalId: string, doctorUserId?: string) => {
   const existing = await prisma.order.findFirst({ where: { id, hospitalId } });
   if (!existing) throw new AppError('Order not found', 404);
+  if (existing.source === 'AI_EXTRACTED') {
+    logCorrection({
+      hospitalId,
+      doctorUserId,
+      artifactType: 'ORDER',
+      artifactId: existing.id,
+      correctionKind: 'REJECT_AI',
+      aiValue: { type: existing.type, name: existing.name, dosage: existing.dosage, frequency: existing.frequency },
+      soapNoteId: existing.soapNoteId,
+      orderId: existing.id,
+    });
+  }
   await prisma.order.delete({ where: { id } });
 };
 
@@ -348,9 +422,28 @@ export const getNhiaCatalog = () =>
     section: e.section,
   }));
 
-export const deleteBillingCode = async (id: string, hospitalId: string) => {
+export const deleteBillingCode = async (id: string, hospitalId: string, doctorUserId?: string) => {
   const existing = await prisma.billingCode.findFirst({ where: { id, hospitalId } });
   if (!existing) throw new AppError('Billing code not found', 404);
+  if (existing.source === 'AI_EXTRACTED') {
+    logCorrection({
+      hospitalId,
+      doctorUserId,
+      artifactType: 'BILLING_CODE',
+      artifactId: existing.id,
+      correctionKind: 'REJECT_AI',
+      aiValue: {
+        codeType: existing.codeType,
+        code: existing.code,
+        description: existing.description,
+        tariffNgn: existing.tariffNgn,
+        wasSelected: existing.isSelected,
+      },
+      soapNoteId: existing.soapNoteId,
+      problemId: existing.problemId,
+      orderId: existing.orderId,
+    });
+  }
   await prisma.billingCode.delete({ where: { id } });
 };
 
@@ -364,7 +457,8 @@ export const addBillingCode = async (
     code: string;
     description: string;
     tariffNgn?: number | null;
-  }
+  },
+  doctorUserId?: string
 ) => {
   const code = data.code.trim();
   const description = data.description.trim();
@@ -430,7 +524,7 @@ export const addBillingCode = async (
         data: { isSelected: false },
       });
     }
-    return tx.billingCode.create({
+    const created = await tx.billingCode.create({
       data: {
         soapNoteId: parentSoapNoteId,
         hospitalId,
@@ -445,6 +539,28 @@ export const addBillingCode = async (
         source: 'DOCTOR_ADDED',
       },
     });
+
+    // Doctor typed in a code the AI didn't suggest — strong signal the AI
+    // missed something. Log outside the tx (fire-and-forget) so a logging
+    // failure can't block the create.
+    logCorrection({
+      hospitalId,
+      doctorUserId,
+      artifactType: 'BILLING_CODE',
+      artifactId: created.id,
+      correctionKind: 'MANUAL_ADD',
+      doctorValue: {
+        codeType: created.codeType,
+        code: created.code,
+        description: created.description,
+        tariffNgn: created.tariffNgn,
+      },
+      soapNoteId: parentSoapNoteId,
+      problemId: scopedProblemId,
+      orderId: scopedOrderId,
+    });
+
+    return created;
   });
 };
 
@@ -454,10 +570,27 @@ export const addBillingCode = async (
 export const selectBillingCode = async (
   id: string,
   hospitalId: string,
-  isSelected: boolean
+  isSelected: boolean,
+  doctorUserId?: string
 ) => {
   const existing = await prisma.billingCode.findFirst({ where: { id, hospitalId } });
   if (!existing) throw new AppError('Billing code not found', 404);
+
+  // The AI's pre-selected sibling we're about to deselect — useful context
+  // for the correction log.
+  let previouslySelectedSibling: { id: string; code: string; description: string } | null = null;
+  if (isSelected && existing.problemId) {
+    const ai = await prisma.billingCode.findFirst({
+      where: {
+        problemId: existing.problemId,
+        codeType: existing.codeType,
+        isSelected: true,
+        id: { not: id },
+      },
+      select: { id: true, code: true, description: true },
+    });
+    if (ai) previouslySelectedSibling = ai;
+  }
 
   return prisma.$transaction(async (tx) => {
     if (isSelected && existing.problemId) {
@@ -470,10 +603,31 @@ export const selectBillingCode = async (
         data: { isSelected: false },
       });
     }
-    return tx.billingCode.update({
+    const updated = await tx.billingCode.update({
       where: { id },
       data: { isSelected, source: 'DOCTOR_EDITED' },
     });
+
+    // Only log when the doctor swapped FROM an AI suggestion TO a different
+    // candidate. That's the high-signal case — the AI was wrong and the
+    // doctor knew which one was right.
+    if (isSelected && previouslySelectedSibling && previouslySelectedSibling.id !== id) {
+      logCorrection({
+        hospitalId,
+        doctorUserId,
+        artifactType: 'BILLING_CODE',
+        artifactId: updated.id,
+        correctionKind: 'CODE_SWAP',
+        aiValue: previouslySelectedSibling,
+        doctorValue: { id: updated.id, code: updated.code, description: updated.description },
+        soapNoteId: updated.soapNoteId,
+        problemId: updated.problemId,
+        orderId: updated.orderId,
+        metadata: { codeType: updated.codeType },
+      });
+    }
+
+    return updated;
   });
 };
 

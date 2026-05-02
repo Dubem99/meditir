@@ -557,6 +557,49 @@ model OfflineSyncQueue {
 }
 
 // ─────────────────────────────────────────────
+// AI CORRECTION LOG
+// ─────────────────────────────────────────────
+// Captures the diff every time a doctor changes something the AI produced.
+// Feeds the self-improvement loop: identify miscoding patterns, prompt drift,
+// section-quality issues, etc. Distinct from AuditLog (which is access-trail
+// for compliance) — AiCorrection is signal-trail for prompt tuning.
+
+model AiCorrection {
+  id           String   @id @default(uuid())
+  hospitalId   String
+  doctorUserId String?
+
+  // What was corrected
+  artifactType   String  // SOAP_SECTION | PROBLEM | ORDER | BILLING_CODE
+  artifactId     String  // ID of the entity corrected
+  correctionKind String  // EDIT | DELETE | REJECT_AI | MANUAL_ADD | CODE_SWAP | STATUS_CHANGE
+
+  // For SOAP_SECTION: which field (subjective/objective/assessment/plan)
+  field String?
+
+  // What the AI produced and what it became
+  aiValue     Json?
+  doctorValue Json?
+
+  // Context for downstream analysis
+  soapNoteId String?
+  problemId  String?
+  orderId    String?
+
+  // Free-form metadata (e.g., model version, prompt version, latency)
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([hospitalId, createdAt])
+  @@index([artifactType, createdAt])
+  @@index([soapNoteId])
+  @@index([problemId])
+  @@index([orderId])
+  @@map("ai_corrections")
+}
+
+// ─────────────────────────────────────────────
 // AUDIT LOG
 // ─────────────────────────────────────────────
 
