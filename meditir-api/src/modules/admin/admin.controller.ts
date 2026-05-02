@@ -3,6 +3,7 @@ import { prisma } from '../../config/database';
 import { param } from '../../utils/params';
 import { AppError } from '../../utils/AppError';
 import { getPaginationParams } from '../../utils/pagination';
+import { getCorrectionsAnalytics } from './corrections-analytics.service';
 
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new AppError('Authentication required', 401);
@@ -56,6 +57,31 @@ export const toggleUser = async (req: Request, res: Response): Promise<void> => 
     select: { id: true, email: true, isActive: true },
   });
   res.json({ status: 'success', data: updated });
+};
+
+export const correctionsAnalytics = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new AppError('Authentication required', 401);
+
+  const raw = Number(req.query.days);
+  const windowDays =
+    Number.isFinite(raw) ? Math.min(180, Math.max(1, Math.floor(raw))) : 30;
+
+  const data = await getCorrectionsAnalytics(windowDays);
+
+  // Audit-log access to aggregate analytics — even though no PHI is returned,
+  // we want a paper trail of who looked at correction data and when.
+  await prisma.auditLog.create({
+    data: {
+      userId: req.user.id,
+      action: 'VIEW_CORRECTIONS_ANALYTICS',
+      resource: 'AiCorrection',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+      metadata: { windowDays, totalCorrections: data.totalCorrections },
+    },
+  });
+
+  res.json({ status: 'success', data });
 };
 
 export const getAuditLogs = async (req: Request, res: Response): Promise<void> => {

@@ -18,5 +18,6 @@ router.patch('/profile', requireRole(Role.HOSPITAL_ADMIN), asyncHandler(controll
 router.get('/users', requireRole(Role.SUPER_ADMIN), asyncHandler(controller.listUsers));
 router.patch('/users/:id/toggle', requireRole(Role.SUPER_ADMIN), asyncHandler(controller.toggleUser));
 router.get('/audit-logs', requireRole(Role.SUPER_ADMIN, Role.HOSPITAL_ADMIN), resolveTenant, asyncHandler(controller.getAuditLogs));
+router.get('/analytics/corrections', requireRole(Role.SUPER_ADMIN), asyncHandler(controller.correctionsAnalytics));
 
 export default router;

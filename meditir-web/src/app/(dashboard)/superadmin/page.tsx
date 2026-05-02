@@ -24,9 +24,17 @@ export default function SuperAdminDashboard() {
           <h1 className="text-2xl font-bold text-gray-900">Platform Overview</h1>
           <p className="text-gray-500 text-sm">Manage all hospitals on Meditir</p>
         </div>
-        <Link href="/superadmin/hospitals/new">
-          <Button>+ Add Hospital</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/superadmin/corrections"
+            className="text-sm text-gray-600 hover:text-gray-900 border border-gray-200 hover:border-gray-300 px-3 py-2 rounded-xl transition-colors"
+          >
+            AI corrections analytics
+          </Link>
+          <Link href="/superadmin/hospitals/new">
+            <Button>+ Add Hospital</Button>
+          </Link>
+        </div>
       </div>
 
       <Card padding="none">
