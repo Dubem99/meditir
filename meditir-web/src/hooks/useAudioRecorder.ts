@@ -1,13 +1,21 @@
 'use client';
 
 import { useRef, useState, useCallback } from 'react';
-import { api } from '@/lib/api';
+import { getSocket, connectSocket } from '@/lib/socket';
+import { getAccessToken } from '@/lib/api';
 import type { Dialect, Transcription } from '@/types/entities.types';
 
-// Emitted by the recorder. `transcription` is the saved row from the
-// /transcriptions/stream endpoint (already persisted server-side). When
-// `isFinal` is false, `text` is interim display-only — currently unused
-// since gpt-4o-transcribe doesn't stream interim chunks per buffer flush.
+// Realtime STT recorder. Captures microphone audio at 24kHz mono via
+// AudioWorklet, ships PCM16 frames to the server over socket.io. The server
+// proxies to OpenAI's Realtime Transcription API and emits back streaming
+// partial transcripts (word-by-word feel) plus a saved Transcription row
+// when each utterance completes.
+//
+// Browser audio chain:
+//   getUserMedia → MediaStreamSource → AudioWorkletNode(pcm-worklet)
+//                                          ↓ posts Int16 ArrayBuffer
+//                                   socket.emit('transcribe:audio', buf)
+
 export interface TranscriptSegment {
   text: string;
   isFinal: boolean;
@@ -24,33 +32,9 @@ export interface UseAudioRecorderReturn {
 
 interface AudioRecorderOptions {
   sessionId: string;
-  // Chunk duration in ms. 5-10s gives a reasonable trade-off between latency
-  // (lower = faster on-screen feedback) and STT cost+quality (higher =
-  // fewer API calls + more context for the model).
-  chunkMs?: number;
 }
 
-const DEFAULT_CHUNK_MS = 7000;
-
-const pickMimeType = (): string => {
-  if (typeof window === 'undefined') return 'audio/webm';
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4',
-    'audio/ogg;codecs=opus',
-  ];
-  const MR = (window as typeof window & { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
-  if (!MR || typeof MR.isTypeSupported !== 'function') return 'audio/webm';
-  for (const c of candidates) {
-    try {
-      if (MR.isTypeSupported(c)) return c;
-    } catch {
-      // ignore — Safari historically threw on some inputs
-    }
-  }
-  return 'audio/webm';
-};
+const TARGET_SAMPLE_RATE = 24_000; // OpenAI Realtime Transcription expects pcm16 24kHz mono
 
 export const useAudioRecorder = (
   dialect: Dialect = 'NIGERIAN_ENGLISH',
@@ -59,66 +43,63 @@ export const useAudioRecorder = (
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const recorderRef = useRef<MediaRecorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const workletRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const chunkBufRef = useRef<Blob[]>([]);
-  // Wall-clock anchor for the recording session. All `startMs` values sent to
-  // the server are OFFSETS from this anchor, not Unix timestamps. The
-  // Transcription.startMs column is INT4 (~2.1B max) so absolute timestamps
-  // would overflow.
-  const recordingStartedAtRef = useRef<number>(0);
-  const chunkStartMsRef = useRef<number>(0);
   const onSegmentRef = useRef<(segment: TranscriptSegment) => void>(() => {});
-  const stopRequestedRef = useRef(false);
   const dialectRef = useRef<Dialect>(dialect);
   dialectRef.current = dialect;
+
+  // Listeners attached during start, removed on stop. Holding refs lets us
+  // remove the exact same function references later.
+  const partialListenerRef = useRef<((p: { text: string }) => void) | null>(null);
+  const finalListenerRef = useRef<((p: { transcription: Transcription }) => void) | null>(null);
+  const errorListenerRef = useRef<((p: { message: string }) => void) | null>(null);
+  const closedListenerRef = useRef<(() => void) | null>(null);
+
+  // Accumulates delta text across one utterance. Reset on final.
+  const currentInterimRef = useRef<string>('');
 
   const isSupported =
     typeof window !== 'undefined' &&
     typeof navigator !== 'undefined' &&
     'mediaDevices' in navigator &&
     'getUserMedia' in navigator.mediaDevices &&
-    typeof (window as typeof window & { MediaRecorder?: typeof MediaRecorder }).MediaRecorder !== 'undefined';
+    typeof (window as typeof window & { AudioContext?: typeof AudioContext }).AudioContext !== 'undefined';
 
-  const flushChunkToServer = useCallback(
-    async (blob: Blob, chunkStartedAt: number) => {
-      if (!options?.sessionId) return;
-      if (blob.size === 0) return;
+  const cleanup = useCallback(() => {
+    const sock = getSocket();
 
-      // startMs in the schema is the OFFSET from the start of recording.
-      // Sending an absolute Date.now() value overflows the INT4 column.
-      const offsetMs = Math.max(
-        0,
-        chunkStartedAt - (recordingStartedAtRef.current || chunkStartedAt)
-      );
+    // Detach socket listeners
+    if (partialListenerRef.current) sock.off('transcribe:partial', partialListenerRef.current);
+    if (finalListenerRef.current) sock.off('transcribe:final', finalListenerRef.current);
+    if (errorListenerRef.current) sock.off('transcribe:error', errorListenerRef.current);
+    if (closedListenerRef.current) sock.off('transcribe:closed', closedListenerRef.current);
+    partialListenerRef.current = null;
+    finalListenerRef.current = null;
+    errorListenerRef.current = null;
+    closedListenerRef.current = null;
 
-      const form = new FormData();
-      const mime = blob.type || 'audio/webm';
-      const ext = mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm';
-      form.append('audio', blob, `chunk-${offsetMs}.${ext}`);
-      form.append('sessionId', options.sessionId);
-      form.append('dialect', dialectRef.current);
-      form.append('startMs', String(offsetMs));
-      form.append('speakerTag', 'DOCTOR');
-
-      try {
-        const res = await api.post('/transcriptions/stream', form, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        const data: Transcription | null = res.data?.data ?? null;
-        // data === null when the chunk transcribed to empty (e.g. silence).
-        // Skip emitting in that case to avoid showing empty rows.
-        if (data && data.text) {
-          onSegmentRef.current({ text: data.text, isFinal: true, transcription: data });
-        }
-      } catch (err) {
-        const e = err as { response?: { data?: { message?: string }; status?: number }; message?: string };
-        const msg = e?.response?.data?.message ?? e?.message ?? 'Transcription failed';
-        setError(`STT error: ${msg}`);
-      }
-    },
-    [options?.sessionId]
-  );
+    if (workletRef.current) {
+      try { workletRef.current.disconnect(); } catch { /* ignore */ }
+      workletRef.current.port.onmessage = null;
+      workletRef.current = null;
+    }
+    if (sourceRef.current) {
+      try { sourceRef.current.disconnect(); } catch { /* ignore */ }
+      sourceRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => undefined);
+      audioContextRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    currentInterimRef.current = '';
+  }, []);
 
   const startRecording = useCallback(
     async (onSegment: (segment: TranscriptSegment) => void) => {
@@ -130,10 +111,58 @@ export const useAudioRecorder = (
         setError('Missing sessionId — cannot start transcription.');
         return;
       }
+      const token = getAccessToken();
+      if (!token) {
+        setError('Not authenticated.');
+        return;
+      }
+
       onSegmentRef.current = onSegment;
-      stopRequestedRef.current = false;
       setError(null);
 
+      // Ensure socket is connected
+      const sock = connectSocket();
+
+      // Set up listeners BEFORE emitting start so we don't miss early events.
+      const onPartial = ({ text: delta }: { text: string }) => {
+        if (!delta) return;
+        currentInterimRef.current += delta;
+        onSegmentRef.current({ text: currentInterimRef.current, isFinal: false });
+      };
+      const onFinal = ({ transcription }: { transcription: Transcription }) => {
+        currentInterimRef.current = '';
+        if (transcription && transcription.text) {
+          onSegmentRef.current({
+            text: transcription.text,
+            isFinal: true,
+            transcription,
+          });
+        }
+      };
+      const onErrorEvt = ({ message }: { message: string }) => {
+        setError(`STT error: ${message}`);
+      };
+      const onClosed = () => {
+        // Server-initiated close. Keep the audio chain alive in case the user
+        // is still trying to record — but surface the state.
+      };
+
+      sock.on('transcribe:partial', onPartial);
+      sock.on('transcribe:final', onFinal);
+      sock.on('transcribe:error', onErrorEvt);
+      sock.on('transcribe:closed', onClosed);
+      partialListenerRef.current = onPartial;
+      finalListenerRef.current = onFinal;
+      errorListenerRef.current = onErrorEvt;
+      closedListenerRef.current = onClosed;
+
+      sock.emit('transcribe:start', {
+        accessToken: token,
+        sessionId: options.sessionId,
+        dialect: dialectRef.current,
+      });
+
+      // Mic capture
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -150,103 +179,59 @@ export const useAudioRecorder = (
         } else {
           setError(`Could not access microphone: ${e?.message ?? 'unknown error'}`);
         }
+        cleanup();
+        sock.emit('transcribe:stop');
         return;
       }
       streamRef.current = stream;
 
-      const mimeType = pickMimeType();
-      let recorder: MediaRecorder;
+      // AudioContext at 24 kHz so the browser does the resampling for us.
+      const Ctx = (window as typeof window & {
+        AudioContext: typeof AudioContext;
+        webkitAudioContext?: typeof AudioContext;
+      }).AudioContext;
+      const ctx = new Ctx({ sampleRate: TARGET_SAMPLE_RATE });
+      audioContextRef.current = ctx;
+
       try {
-        recorder = new MediaRecorder(stream, { mimeType });
-      } catch {
-        recorder = new MediaRecorder(stream); // fall back to default
+        await ctx.audioWorklet.addModule('/pcm-worklet.js');
+      } catch (err) {
+        setError(`Failed to load audio worklet: ${(err as Error).message}`);
+        cleanup();
+        sock.emit('transcribe:stop');
+        return;
       }
-      recorderRef.current = recorder;
 
-      // We rely on `timeslice` to fire dataavailable per chunk. When the chunk
-      // arrives, we ship it to the server and reset the buffer. This way each
-      // network call carries exactly one chunk's worth of audio.
-      recorder.addEventListener('dataavailable', (event: BlobEvent) => {
-        if (event.data && event.data.size > 0) {
-          chunkBufRef.current.push(event.data);
-        }
-      });
+      const source = ctx.createMediaStreamSource(stream);
+      sourceRef.current = source;
 
-      const chunkMs = options.chunkMs ?? DEFAULT_CHUNK_MS;
-      // Anchor the session — chunk offsets are computed relative to this.
-      recordingStartedAtRef.current = Date.now();
-      let chunkStart = Date.now();
-      chunkStartMsRef.current = chunkStart;
+      const worklet = new AudioWorkletNode(ctx, 'pcm-worklet');
+      workletRef.current = worklet;
 
-      // The standard MediaRecorder API doesn't natively split into discrete
-      // chunks for our use case — `timeslice` produces fragments that aren't
-      // independently decodable for codecs like Opus-in-WebM. So we
-      // periodically stop+restart the recorder to produce self-contained
-      // playable chunks.
-      const restartInterval = setInterval(() => {
-        if (stopRequestedRef.current) return;
-        if (recorder.state !== 'recording') return;
-        recorder.stop();
-        // restart after the dataavailable + stop event fire
-        setTimeout(() => {
-          if (stopRequestedRef.current || !streamRef.current) return;
-          try {
-            const newRecorder = new MediaRecorder(streamRef.current, { mimeType });
-            recorderRef.current = newRecorder;
-            newRecorder.addEventListener('dataavailable', (event: BlobEvent) => {
-              if (event.data && event.data.size > 0) chunkBufRef.current.push(event.data);
-            });
-            newRecorder.addEventListener('stop', handleStop);
-            newRecorder.start();
-          } catch {
-            // recovery failed — surface error and stop
-            setError('Recording interrupted. Click record again to resume.');
-            stopRequestedRef.current = true;
-          }
-        }, 50);
-      }, chunkMs);
-
-      const handleStop = () => {
-        const blob = new Blob(chunkBufRef.current, { type: mimeType });
-        const startedAt = chunkStart;
-        chunkBufRef.current = [];
-        chunkStart = Date.now();
-        chunkStartMsRef.current = chunkStart;
-        // Fire and forget — we don't block the next chunk's recording on STT.
-        void flushChunkToServer(blob, startedAt);
-
-        if (stopRequestedRef.current) {
-          clearInterval(restartInterval);
-          if (streamRef.current) {
-            streamRef.current.getTracks().forEach((t) => t.stop());
-            streamRef.current = null;
-          }
-          recorderRef.current = null;
-          setIsRecording(false);
+      worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        // Forward raw PCM16 little-endian bytes. socket.io will frame this as
+        // a binary attachment — Node side receives a Buffer.
+        if (sock.connected) {
+          sock.emit('transcribe:audio', event.data);
         }
       };
-      recorder.addEventListener('stop', handleStop);
 
-      recorder.start();
+      source.connect(worklet);
+      // Don't connect to ctx.destination — we don't want to play the mic back
+      // through the speakers. The worklet still pulls input as long as the
+      // source is connected to it.
+
       setIsRecording(true);
     },
-    [isSupported, options, flushChunkToServer]
+    [isSupported, options, cleanup]
   );
 
   const stopRecording = useCallback(() => {
-    stopRequestedRef.current = true;
-    const r = recorderRef.current;
-    if (r && r.state !== 'inactive') {
-      try { r.stop(); } catch { /* ignore */ }
-    } else {
-      // No active recorder — clean up stream directly
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-      setIsRecording(false);
-    }
-  }, []);
+    const sock = getSocket();
+    if (sock.connected) sock.emit('transcribe:stop');
+    cleanup();
+    setIsRecording(false);
+  }, [cleanup]);
 
   return { isRecording, startRecording, stopRecording, error, isSupported };
 };
