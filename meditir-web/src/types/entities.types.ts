@@ -182,7 +182,6 @@ export interface NoteTemplate {
   id: string;
   name: string;
   description: string;
-  emoji?: string;
 }
 
 export type CodeSystem = 'ICD10' | 'SNOMED' | 'CPT' | 'NHIA';

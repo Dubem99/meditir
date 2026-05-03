@@ -69,37 +69,32 @@ export const TemplateSelector = ({ sessionId, value, onChange, disabled }: Props
                 onClick={() => handleSelect(t.id)}
                 disabled={disabled || isSaving}
                 className={[
-                  'flex items-start gap-3 text-left p-3 rounded-xl border transition-colors',
+                  'text-left p-3 rounded-xl border transition-colors',
                   active
                     ? 'bg-primary-50 border-primary-200 ring-1 ring-primary-200'
                     : 'bg-white border-gray-200 hover:border-gray-300',
                   disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
                 ].join(' ')}
               >
-                <span className="text-xl shrink-0 mt-0.5" aria-hidden>
-                  {t.emoji ?? '📝'}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p
-                      className={[
-                        'text-sm font-medium',
-                        active ? 'text-primary-900' : 'text-gray-900',
-                      ].join(' ')}
-                    >
-                      {t.name}
-                    </p>
-                    {active && (
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-primary-700 bg-primary-100 rounded-full px-1.5 py-0.5">
-                        Active
-                      </span>
-                    )}
-                    {isSaving && (
-                      <span className="text-[10px] text-gray-400">saving…</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{t.description}</p>
+                <div className="flex items-center gap-2 mb-1">
+                  <p
+                    className={[
+                      'text-sm font-medium',
+                      active ? 'text-primary-900' : 'text-gray-900',
+                    ].join(' ')}
+                  >
+                    {t.name}
+                  </p>
+                  {active && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-primary-700 bg-primary-100 rounded-full px-1.5 py-0.5">
+                      Active
+                    </span>
+                  )}
+                  {isSaving && (
+                    <span className="text-[10px] text-gray-400">saving…</span>
+                  )}
                 </div>
+                <p className="text-xs text-gray-500 leading-relaxed">{t.description}</p>
               </button>
             );
           })}

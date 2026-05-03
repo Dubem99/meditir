@@ -14,7 +14,6 @@ export interface NoteTemplate {
   // Used to auto-pick a default based on Doctor.specialization. If nothing
   // matches (case-insensitive substring), General Practice is the fallback.
   matchSpecialty?: string[];
-  emoji?: string;
   systemPrompt: string;
 }
 
@@ -40,7 +39,6 @@ export const NOTE_TEMPLATES: ReadonlyArray<NoteTemplate> = [
     name: 'General Practice',
     description: 'Default SOAP note for general adult consultations',
     matchSpecialty: ['general practice', 'family medicine', 'general physician', 'gp'],
-    emoji: '🩺',
     systemPrompt: `You are a clinical documentation assistant for Nigerian hospitals.
 Convert a doctor-patient consultation transcript into a structured SOAP note.
 
@@ -57,7 +55,6 @@ ${SHARED_RULES}`,
     name: 'Paediatrics',
     description: 'For consultations involving infants, children, and adolescents',
     matchSpecialty: ['paediatrics', 'pediatrics', 'paediatrician', 'pediatrician', 'child health'],
-    emoji: '👶',
     systemPrompt: `You are a paediatric clinical documentation assistant for Nigerian hospitals.
 Convert the consultation transcript into a structured paediatric SOAP note.
 
@@ -74,7 +71,6 @@ ${SHARED_RULES}`,
     name: 'Antenatal Care',
     description: 'Routine and follow-up antenatal visits',
     matchSpecialty: ['obstetrics', 'gynaecology', 'gynecology', 'obs/gyn', 'maternal health'],
-    emoji: '🤰',
     systemPrompt: `You are an obstetric clinical documentation assistant for Nigerian hospitals.
 Convert the antenatal consultation transcript into a structured SOAP note.
 
@@ -91,7 +87,6 @@ ${SHARED_RULES}`,
     name: 'Mental Health',
     description: 'Psychiatric consultations and follow-ups',
     matchSpecialty: ['psychiatry', 'mental health', 'psychiatric', 'psychologist'],
-    emoji: '🧠',
     systemPrompt: `You are a psychiatric clinical documentation assistant for Nigerian hospitals.
 Convert the consultation transcript into a structured mental-health SOAP note.
 
@@ -108,7 +103,6 @@ ${SHARED_RULES}`,
     name: 'Surgical / Procedure',
     description: 'Pre-op consults, intra-op notes, post-op follow-ups, minor procedures',
     matchSpecialty: ['surgery', 'surgical', 'surgeon', 'orthopaedic', 'orthopedic', 'urology', 'ent'],
-    emoji: '🔪',
     systemPrompt: `You are a surgical clinical documentation assistant for Nigerian hospitals.
 Convert the consultation/procedure transcript into a structured surgical SOAP note.
 
@@ -147,5 +141,4 @@ export const getPublicCatalog = () =>
     id: t.id,
     name: t.name,
     description: t.description,
-    emoji: t.emoji,
   }));
