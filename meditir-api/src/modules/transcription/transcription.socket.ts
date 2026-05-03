@@ -3,7 +3,8 @@ import { verifyAccessToken } from '../../utils/jwt';
 import { prisma } from '../../config/database';
 import { Dialect, SessionStatus, SyncStatus } from '../../types/enums';
 import { logger } from '../../utils/logger';
-import { OpenAIRealtimeConnection } from './realtime.openai';
+import { OpenAIRealtimeConnection, AUTO_DETECT_DIALECT } from './realtime.openai';
+import type { DialectInput } from './realtime.openai';
 
 interface TextSegmentPayload {
   sessionId: string;
@@ -16,7 +17,9 @@ interface TextSegmentPayload {
 interface RealtimeStartPayload {
   accessToken: string;
   sessionId: string;
-  dialect: Dialect;
+  // Dialect can be one of the Prisma Dialect values OR the special
+  // AUTO_DETECT marker. The browser's DialectChoice type maps directly here.
+  dialect: DialectInput;
 }
 
 // Tracks one in-flight realtime transcription per socket. Cleaned up when the
@@ -24,7 +27,11 @@ interface RealtimeStartPayload {
 interface RealtimeContext {
   conn: OpenAIRealtimeConnection;
   sessionId: string;
-  dialect: Dialect;
+  // What we send to the STT engine — may be AUTO_DETECT (no language hint).
+  dialect: DialectInput;
+  // What we persist to the Transcription row — must be a real Dialect enum.
+  // For AUTO_DETECT we fall back to the patient's most common tongue.
+  persistDialect: Dialect;
   hospitalId: string;
   userId: string;
   speakerTag: string;
@@ -195,7 +202,14 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
       // wins, in case the browser starts a fresh recording without stop.
       teardown();
 
-      const dialect = payload.dialect ?? Dialect.NIGERIAN_ENGLISH;
+      const dialect: DialectInput = payload.dialect ?? Dialect.NIGERIAN_ENGLISH;
+      // Persisted dialect is always a Prisma enum value. AUTO_DETECT collapses
+      // to NIGERIAN_ENGLISH for the saved row — the model still auto-detects
+      // at the STT layer regardless.
+      const persistDialect: Dialect =
+        dialect === AUTO_DETECT_DIALECT
+          ? Dialect.NIGERIAN_ENGLISH
+          : (dialect as Dialect);
       const recordingStartedAt = Date.now();
       const roomToken = session.roomToken;
       const conn = new OpenAIRealtimeConnection(dialect, {
@@ -209,7 +223,7 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
               data: {
                 sessionId: session.id,
                 text,
-                dialect,
+                dialect: persistDialect,
                 speakerTag: rt?.speakerTag ?? 'DOCTOR',
                 startMs,
                 syncStatus: SyncStatus.SYNCED,
@@ -245,6 +259,7 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
         conn,
         sessionId: session.id,
         dialect,
+        persistDialect,
         hospitalId: session.hospitalId,
         userId: claims.userId,
         speakerTag: 'DOCTOR',

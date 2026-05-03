@@ -3,7 +3,8 @@
 import { useRef, useState, useCallback } from 'react';
 import { getSocket, connectSocket } from '@/lib/socket';
 import { getAccessToken } from '@/lib/api';
-import type { Dialect, Transcription } from '@/types/entities.types';
+import type { Transcription } from '@/types/entities.types';
+import type { DialectChoice } from '@/components/transcription/DialectSelector';
 
 // Realtime STT recorder. Captures microphone audio at 24kHz mono via
 // AudioWorklet, ships PCM16 frames to the server over socket.io. The server
@@ -42,7 +43,7 @@ interface AudioRecorderOptions {
 const TARGET_SAMPLE_RATE = 24_000;
 
 export const useAudioRecorder = (
-  dialect: Dialect = 'NIGERIAN_ENGLISH',
+  dialect: DialectChoice = 'NIGERIAN_ENGLISH',
   options?: AudioRecorderOptions
 ): UseAudioRecorderReturn => {
   const [isRecording, setIsRecording] = useState(false);
@@ -57,7 +58,7 @@ export const useAudioRecorder = (
   const levelRafRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const onSegmentRef = useRef<(segment: TranscriptSegment) => void>(() => {});
-  const dialectRef = useRef<Dialect>(dialect);
+  const dialectRef = useRef<DialectChoice>(dialect);
   dialectRef.current = dialect;
 
   // Listeners attached during start, removed on stop.

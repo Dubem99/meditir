@@ -6,9 +6,10 @@ import { useTranscription } from '@/hooks/useTranscription';
 import { useOfflineSync } from '@/hooks/useOfflineSync';
 import { useSessionStore } from '@/store/session.store';
 import { useAuthStore } from '@/store/auth.store';
-import { DialectSelector } from './DialectSelector';
+import { DialectSelector, dialectChoiceLabel } from './DialectSelector';
+import type { DialectChoice } from './DialectSelector';
 import { TemplateSelector } from './TemplateSelector';
-import type { ConsultationSession, Dialect, NoteTemplate } from '@/types/entities.types';
+import type { ConsultationSession, NoteTemplate } from '@/types/entities.types';
 import { api } from '@/lib/api';
 
 interface Props {
@@ -30,13 +31,6 @@ const formatTime = (s: number) => {
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 };
 
-const dialectLabel: Record<Dialect, string> = {
-  NIGERIAN_ENGLISH: 'Nigerian English',
-  YORUBA_ACCENTED: 'Yoruba',
-  HAUSA_ACCENTED: 'Hausa',
-  IGBO_ACCENTED: 'Igbo',
-};
-
 const ChevronDown = ({ className }: { className?: string }) => (
   <svg className={className} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="6 9 12 15 18 9" />
@@ -44,7 +38,7 @@ const ChevronDown = ({ className }: { className?: string }) => (
 );
 
 export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
-  const [dialect, setDialect] = useState<Dialect>(session.dialect);
+  const [dialect, setDialect] = useState<DialectChoice>(session.dialect);
   const [templateId, setTemplateId] = useState<string>(session.templateId ?? 'general-practice');
   const [templateName, setTemplateName] = useState<string>('General Practice');
   const [isEndingSession, setIsEndingSession] = useState(false);
@@ -379,8 +373,8 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
           onClick={() => setActiveSheet(activeSheet === 'template' ? null : 'template')}
         />
         <ToolbarPill
-          label="Dialect"
-          value={dialectLabel[dialect]}
+          label="Language"
+          value={dialectChoiceLabel(dialect)}
           active={activeSheet === 'dialect'}
           onClick={() => setActiveSheet(activeSheet === 'dialect' ? null : 'dialect')}
         />

@@ -8,11 +8,12 @@ import { useSessionStore } from '@/store/session.store';
 import { connectSocket, joinSession, leaveSession } from '@/lib/socket';
 import { storeOfflineTranscription } from '@/lib/indexedDB';
 import type { Dialect, Transcription } from '@/types/entities.types';
+import type { DialectChoice } from '@/components/transcription/DialectSelector';
 
 export const useTranscription = (
   sessionId: string,
   roomToken: string,
-  dialect: Dialect
+  dialect: DialectChoice
 ) => {
   const isOnline = useOfflineStore((s) => s.isOnline);
   const incrementPending = useOfflineStore((s) => s.incrementPending);
@@ -61,6 +62,10 @@ export const useTranscription = (
 
     // Offline / fallback path: no server round-trip happened (or it failed).
     // Show the text locally and queue for sync once we're back online.
+    // Auto-detect doesn't have a Prisma Dialect value — fall back to the
+    // patient's most likely tongue (Nigerian English) for persistence.
+    const persistedDialect: Dialect =
+      dialect === 'AUTO_DETECT' ? 'NIGERIAN_ENGLISH' : (dialect as Dialect);
     const startMs = Date.now() - startMsRef.current;
     addTranscription({
       id: `offline-${Date.now()}`,
@@ -68,14 +73,14 @@ export const useTranscription = (
       text,
       speakerTag: 'DOCTOR',
       startMs,
-      dialect,
+      dialect: persistedDialect,
       createdAt: new Date().toISOString(),
     });
     if (!isOnline) {
       storeOfflineTranscription({
         sessionId,
         text,
-        dialect,
+        dialect: persistedDialect,
         speakerTag: 'DOCTOR',
         startMs,
         createdAt: Date.now(),

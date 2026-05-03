@@ -21,6 +21,11 @@ const dialectToLanguage: Record<Dialect, string> = {
   IGBO_ACCENTED: 'ig',
 };
 
+// Synthetic value sent by the browser when the doctor picks "Auto-detect" —
+// we omit the language hint so OpenAI's model auto-detects per utterance.
+export const AUTO_DETECT_DIALECT = 'AUTO_DETECT';
+export type DialectInput = Dialect | typeof AUTO_DETECT_DIALECT;
+
 export interface RealtimeCallbacks {
   onPartial: (text: string) => void;
   onFinal: (text: string, durationMs: number) => void;
@@ -32,7 +37,7 @@ export class OpenAIRealtimeConnection {
   private ws: WebSocket | null = null;
   private opened = false;
   private closed = false;
-  private dialect: Dialect;
+  private dialect: DialectInput;
   private cb: RealtimeCallbacks;
   private finalStartedAt: number = 0;
   private currentItemId: string | null = null;
@@ -40,7 +45,7 @@ export class OpenAIRealtimeConnection {
   // flush once it opens.
   private pendingAudioFrames: string[] = [];
 
-  constructor(dialect: Dialect, cb: RealtimeCallbacks) {
+  constructor(dialect: DialectInput, cb: RealtimeCallbacks) {
     this.dialect = dialect;
     this.cb = cb;
   }
@@ -67,14 +72,21 @@ export class OpenAIRealtimeConnection {
       // Configure the session: enable transcription with our chosen model
       // and language hint, plus server-side VAD so OpenAI auto-segments
       // speech into individual transcribable utterances.
+      //
+      // For AUTO_DETECT we omit `language` entirely — OpenAI then runs its
+      // language-detection on each utterance. Costs a small accuracy hit on
+      // low-resource African languages but handles code-switching well.
+      const transcription: { model: string; language?: string } = {
+        model: config.OPENAI_TRANSCRIBE_MODEL,
+      };
+      if (this.dialect !== AUTO_DETECT_DIALECT) {
+        transcription.language = dialectToLanguage[this.dialect as Dialect] ?? 'en';
+      }
       this.send({
         type: 'transcription_session.update',
         session: {
           input_audio_format: 'pcm16',
-          input_audio_transcription: {
-            model: config.OPENAI_TRANSCRIBE_MODEL,
-            language: dialectToLanguage[this.dialect] ?? 'en',
-          },
+          input_audio_transcription: transcription,
           // Server VAD chunks utterances based on silence — gives us natural
           // sentence-level finals while still streaming partial deltas.
           turn_detection: {
