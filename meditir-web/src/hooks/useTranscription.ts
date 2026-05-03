@@ -2,11 +2,11 @@
 
 import { useEffect, useCallback, useRef, useState } from 'react';
 import { useAudioRecorder } from './useAudioRecorder';
+import type { TranscriptSegment } from './useAudioRecorder';
 import { useOfflineStore } from '@/store/offline.store';
 import { useSessionStore } from '@/store/session.store';
-import { connectSocket, getSocket, joinSession, leaveSession } from '@/lib/socket';
+import { connectSocket, joinSession, leaveSession } from '@/lib/socket';
 import { storeOfflineTranscription } from '@/lib/indexedDB';
-import { api } from '@/lib/api';
 import type { Dialect, Transcription } from '@/types/entities.types';
 
 export const useTranscription = (
@@ -18,11 +18,12 @@ export const useTranscription = (
   const incrementPending = useOfflineStore((s) => s.incrementPending);
   const addTranscription = useSessionStore((s) => s.addTranscription);
   const setRecording = useSessionStore((s) => s.setRecording);
-  const recorder = useAudioRecorder(dialect);
+  const recorder = useAudioRecorder(dialect, { sessionId });
   const startMsRef = useRef(Date.now());
   const [interimText, setInterimText] = useState<string>('');
 
-  // Connect socket and join room on mount
+  // Connect socket and join room on mount — the socket layer is still used
+  // for cross-device fan-out (e.g., admin viewing the live transcript).
   useEffect(() => {
     const socket = connectSocket();
     joinSession(roomToken);
@@ -36,10 +37,10 @@ export const useTranscription = (
     };
   }, [roomToken, addTranscription]);
 
-  // Stable ref to the latest segment handler so the recorder always calls
-  // fresh state (isOnline, dialect, etc) without needing to restart.
-  const handleSegmentRef = useRef<(s: { text: string; isFinal: boolean }) => void>(() => {});
-  handleSegmentRef.current = ({ text, isFinal }) => {
+  // Stable ref so the recorder always calls fresh state without needing to
+  // restart when isOnline / dialect change.
+  const handleSegmentRef = useRef<(s: TranscriptSegment) => void>(() => {});
+  handleSegmentRef.current = ({ text, isFinal, transcription }) => {
     if (!text) return;
 
     if (!isFinal) {
@@ -47,40 +48,30 @@ export const useTranscription = (
       return;
     }
 
-    // Final segment — clear interim display and persist
+    // Final segment — clear interim display.
     setInterimText('');
-    const startMs = Date.now() - startMsRef.current;
 
-    if (isOnline) {
-      api
-        .post('/transcriptions/segment', { sessionId, text, speakerTag: 'DOCTOR', startMs, dialect })
-        .then((res) => addTranscription(res.data.data))
-        .catch(() => {
-          // Socket fallback — still shows the final locally so the doctor sees it
-          addTranscription({
-            id: `local-${Date.now()}`,
-            sessionId,
-            text,
-            speakerTag: 'DOCTOR',
-            startMs,
-            dialect,
-            createdAt: new Date().toISOString(),
-          });
-          try {
-            getSocket().emit('transcription:text_segment', { sessionId, text, speakerTag: 'DOCTOR', startMs, dialect });
-          } catch {}
-        });
-    } else {
-      // Offline — show locally and queue for sync
-      addTranscription({
-        id: `offline-${Date.now()}`,
-        sessionId,
-        text,
-        speakerTag: 'DOCTOR',
-        startMs,
-        dialect,
-        createdAt: new Date().toISOString(),
-      });
+    // Online path: the /transcriptions/stream endpoint already saved the
+    // transcription server-side and returned the full record. Just put it in
+    // the local store; no second POST needed.
+    if (transcription) {
+      addTranscription(transcription);
+      return;
+    }
+
+    // Offline / fallback path: no server round-trip happened (or it failed).
+    // Show the text locally and queue for sync once we're back online.
+    const startMs = Date.now() - startMsRef.current;
+    addTranscription({
+      id: `offline-${Date.now()}`,
+      sessionId,
+      text,
+      speakerTag: 'DOCTOR',
+      startMs,
+      dialect,
+      createdAt: new Date().toISOString(),
+    });
+    if (!isOnline) {
       storeOfflineTranscription({
         sessionId,
         text,

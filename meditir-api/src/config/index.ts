@@ -24,6 +24,12 @@ const configSchema = z.object({
   CLAUDE_MODEL: z.string().default('claude-sonnet-4-6'),
   SOAP_PROMPT_VERSION: z.string().default('v1.0.0'),
 
+  // OpenAI is used solely for STT (gpt-4o-transcribe). When unset, the
+  // /transcription/stream endpoint returns 503 — falls back to nothing,
+  // so missing key is observable but non-fatal at boot.
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_TRANSCRIBE_MODEL: z.string().default('gpt-4o-transcribe'),
+
   ELEVENLABS_API_KEY: z.string().optional(),
   ELEVENLABS_VOICE_ID: z.string().optional(),
 
