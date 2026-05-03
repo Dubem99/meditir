@@ -6,6 +6,7 @@ import { useTranscription } from '@/hooks/useTranscription';
 import { useOfflineSync } from '@/hooks/useOfflineSync';
 import { useSessionStore } from '@/store/session.store';
 import { DialectSelector } from './DialectSelector';
+import { TemplateSelector } from './TemplateSelector';
 import type { ConsultationSession, Dialect } from '@/types/entities.types';
 import { api } from '@/lib/api';
 
@@ -30,9 +31,11 @@ const formatTime = (s: number) => {
 
 export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
   const [dialect, setDialect] = useState<Dialect>(session.dialect);
+  const [templateId, setTemplateId] = useState<string>(session.templateId ?? 'general-practice');
   const [isEndingSession, setIsEndingSession] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [showDialect, setShowDialect] = useState(false);
+  const [showTemplate, setShowTemplate] = useState(false);
   const [showPatientContext, setShowPatientContext] = useState(true);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
@@ -149,10 +152,20 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
         </div>
         <div className="flex items-center gap-2 sm:shrink-0">
           <button
-            onClick={() => setShowDialect(!showDialect)}
-            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-2 rounded-lg transition-colors shrink-0"
+            onClick={() => { setShowDialect(!showDialect); setShowTemplate(false); }}
+            className={`text-xs hover:text-gray-700 border px-3 py-2 rounded-lg transition-colors shrink-0 ${
+              showDialect ? 'text-gray-900 border-gray-300 bg-gray-50' : 'text-gray-500 border-gray-200'
+            }`}
           >
             Dialect
+          </button>
+          <button
+            onClick={() => { setShowTemplate(!showTemplate); setShowDialect(false); }}
+            className={`text-xs hover:text-gray-700 border px-3 py-2 rounded-lg transition-colors shrink-0 ${
+              showTemplate ? 'text-gray-900 border-gray-300 bg-gray-50' : 'text-gray-500 border-gray-200'
+            }`}
+          >
+            Template
           </button>
           <button
             onClick={handleEnd}
@@ -173,6 +186,19 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
               setShowDialect(false);
             }}
             disabled={isRecording}
+          />
+        </div>
+      )}
+
+      {showTemplate && (
+        <div className="mb-4">
+          <TemplateSelector
+            sessionId={session.id}
+            value={templateId}
+            onChange={(id) => {
+              setTemplateId(id);
+              setShowTemplate(false);
+            }}
           />
         </div>
       )}

@@ -5,6 +5,7 @@ import { SessionStatus } from '../../types/enums';
 import { getPaginationParams, paginate } from '../../utils/pagination';
 import { generateSOAPNote } from '../soap-notes/soap-notes.service';
 import { logger } from '../../utils/logger';
+import { pickDefaultTemplate, getTemplate } from '../../data/note-templates';
 import type { CreateSessionInput, UpdateSessionInput } from './sessions.schema';
 
 const sessionIncludes = {
@@ -43,6 +44,10 @@ export const createSession = async (hospitalId: string, data: CreateSessionInput
   if (!doctor) throw new AppError('Doctor not found in this hospital', 404);
   if (!patient) throw new AppError('Patient not found in this hospital', 404);
 
+  // Pre-select a note template based on the doctor's specialization. The
+  // doctor can change it from the session view before / during recording.
+  const defaultTemplateId = pickDefaultTemplate(doctor.specialization);
+
   return prisma.consultationSession.create({
     data: {
       hospitalId,
@@ -51,7 +56,39 @@ export const createSession = async (hospitalId: string, data: CreateSessionInput
       scheduledAt: new Date(data.scheduledAt),
       dialect: data.dialect,
       notes: data.notes,
+      templateId: defaultTemplateId,
     },
+    include: sessionIncludes,
+  });
+};
+
+// Update the note template for a session. Only the assigned doctor may change
+// it. If the session already has a SOAP note, it is NOT auto-regenerated —
+// the doctor explicitly triggers regeneration via the soap-notes endpoint.
+export const setSessionTemplate = async (
+  sessionId: string,
+  hospitalId: string,
+  doctorUserId: string,
+  templateId: string
+) => {
+  // Validate template id against catalog
+  const template = getTemplate(templateId);
+  if (template.id !== templateId) {
+    throw new AppError(`Unknown template: ${templateId}`, 400);
+  }
+
+  const session = await prisma.consultationSession.findFirst({
+    where: { id: sessionId, hospitalId },
+    include: { doctor: { select: { userId: true } } },
+  });
+  if (!session) throw new AppError('Session not found', 404);
+  if (session.doctor.userId !== doctorUserId) {
+    throw new AppError('Only the session doctor can change the template', 403);
+  }
+
+  return prisma.consultationSession.update({
+    where: { id: sessionId },
+    data: { templateId },
     include: sessionIncludes,
   });
 };

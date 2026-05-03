@@ -9,6 +9,7 @@ import { extractFromSOAPNote } from '../ehr-extractions/ehr-extractions.service'
 import { logger } from '../../utils/logger';
 import { sendSoapNoteToRecords } from '../../services/email.service';
 import { logCorrection, isMeaningfulChange } from '../../services/corrections.service';
+import { getTemplate } from '../../data/note-templates';
 
 const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
@@ -120,12 +121,15 @@ export const generateSOAPNote = async (sessionId: string, hospitalId: string) =>
 Known allergies: ${session.patient.allergies.join(', ') || 'None documented'}
 Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None documented'}${historySection}`;
 
+  // Pick the template prompt for this session (default = general practice).
+  const template = getTemplate(session.templateId);
+
   let parsed: z.infer<typeof SOAPResponseSchema>;
   try {
     const response = await client.messages.create({
       model: config.CLAUDE_MODEL,
       max_tokens: 2048,
-      system: SYSTEM_PROMPT,
+      system: template.systemPrompt,
       messages: [
         {
           role: 'user',

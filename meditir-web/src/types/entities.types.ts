@@ -84,6 +84,7 @@ export interface ConsultationSession {
   dialect: Dialect;
   roomToken?: string;
   notes?: string;
+  templateId?: string | null;
   handoverNote?: string;
   originalDoctorId?: string;
   doctor: { id: string; firstName: string; lastName: string; specialization: string };
@@ -175,6 +176,13 @@ export interface NhiaTariffEntry {
   description: string;
   tariffNgn: number | null;
   section: string;
+}
+
+export interface NoteTemplate {
+  id: string;
+  name: string;
+  description: string;
+  emoji?: string;
 }
 
 export type CodeSystem = 'ICD10' | 'SNOMED' | 'CPT' | 'NHIA';

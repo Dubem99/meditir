@@ -3,6 +3,7 @@ import * as service from './sessions.service';
 import { param, hospitalId } from '../../utils/params';
 import { AppError } from '../../utils/AppError';
 import * as soapService from '../soap-notes/soap-notes.service';
+import { getPublicCatalog } from '../../data/note-templates';
 
 export const create = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new AppError('Authentication required', 401);
@@ -70,4 +71,21 @@ export const handover = async (req: Request, res: Response): Promise<void> => {
 export const analytics = async (req: Request, res: Response): Promise<void> => {
   const data = await service.getAnalytics(hospitalId(req));
   res.json({ status: 'success', data });
+};
+
+export const listTemplates = async (_req: Request, res: Response): Promise<void> => {
+  res.json({ status: 'success', data: getPublicCatalog() });
+};
+
+export const setTemplate = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new AppError('Authentication required', 401);
+  const { templateId } = req.body as { templateId?: string };
+  if (!templateId) throw new AppError('templateId is required', 400);
+  const session = await service.setSessionTemplate(
+    param(req, 'id'),
+    hospitalId(req),
+    req.user.id,
+    templateId
+  );
+  res.json({ status: 'success', data: session });
 };

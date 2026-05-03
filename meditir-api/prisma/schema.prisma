@@ -331,6 +331,10 @@ model ConsultationSession {
   roomToken String? @unique
   notes     String?
 
+  // Note template selected for SOAP generation. References ids in
+  // src/data/note-templates.ts. Defaults to 'general-practice' when null.
+  templateId           String?
+
   handoverNote         String?
   originalDoctorId     String?
 
