@@ -29,7 +29,22 @@ export const createSocketServer = (httpServer: HttpServer): Server => {
   ioInstance = io;
 
   io.on('connection', (socket) => {
-    logger.debug('New socket connection', { socketId: socket.id });
+    logger.info('[socket] new connection', {
+      socketId: socket.id,
+      handshake: {
+        address: socket.handshake.address,
+        url: socket.handshake.url,
+        transport: (socket.conn as { transport?: { name?: string } } | undefined)?.transport?.name,
+      },
+    });
+    socket.onAny((eventName, ...args) => {
+      logger.info('[socket] received event', {
+        socketId: socket.id,
+        eventName,
+        argCount: args.length,
+        argTypes: args.map((a) => typeof a),
+      });
+    });
     registerTranscriptionHandlers(io, socket);
     registerPresenceHandlers(io, socket);
   });
