@@ -151,9 +151,17 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
   };
 
   socket.on('transcribe:start', async (payload: RealtimeStartPayload) => {
+    logger.info('[STT] transcribe:start received', {
+      socketId: socket.id,
+      sessionId: payload?.sessionId,
+      dialect: payload?.dialect,
+      hasToken: !!payload?.accessToken,
+    });
     try {
       const claims = verifyAccessToken(payload.accessToken);
+      logger.info('[STT] claims verified', { role: claims.role, userId: claims.userId });
       if (claims.role !== 'DOCTOR') {
+        logger.warn('[STT] non-doctor role', { role: claims.role });
         socket.emit('transcribe:error', { message: 'Doctors only' });
         return;
       }
@@ -240,8 +248,10 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
         recordingStartedAt,
         roomToken,
       };
+      logger.info('[STT] opening upstream OpenAI Realtime WS', { sessionId: session.id, dialect });
       conn.open();
       socket.emit('transcribe:ready');
+      logger.info('[STT] transcribe:ready emitted to client');
     } catch (err) {
       logger.warn('transcribe:start failed', { err: (err as Error).message });
       socket.emit('transcribe:error', { message: 'Failed to start transcription' });
@@ -251,10 +261,20 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
   // Audio frames arrive as raw binary (Buffer in node). Forward as base64
   // PCM16 to OpenAI. The browser is responsible for encoding to PCM16 24kHz
   // mono before sending.
+  let audioFrameCount = 0;
   socket.on('transcribe:audio', (chunk: ArrayBuffer | Buffer) => {
-    if (!rt) return;
+    if (!rt) {
+      if (audioFrameCount === 0) {
+        logger.warn('[STT] transcribe:audio received but no rt context — was start emitted?');
+      }
+      return;
+    }
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     if (buf.length === 0) return;
+    audioFrameCount++;
+    if (audioFrameCount === 1 || audioFrameCount % 50 === 0) {
+      logger.info('[STT] audio frames forwarded', { count: audioFrameCount, lastBytes: buf.length });
+    }
     rt.conn.appendAudio(buf.toString('base64'));
   });
 

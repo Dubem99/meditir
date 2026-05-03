@@ -62,6 +62,7 @@ export class OpenAIRealtimeConnection {
 
     ws.on('open', () => {
       this.opened = true;
+      logger.info('[STT] upstream OpenAI WS open', { dialect: this.dialect });
 
       // Configure the session: enable transcription with our chosen model
       // and language hint, plus server-side VAD so OpenAI auto-segments
@@ -104,13 +105,13 @@ export class OpenAIRealtimeConnection {
     });
 
     ws.on('error', (err: Error) => {
-      logger.warn('OpenAI Realtime WS error', { message: err.message });
+      logger.error('[STT] upstream OpenAI WS error', { message: err.message });
       this.cb.onError(`Upstream STT error: ${err.message}`);
     });
 
     ws.on('close', (code, reason) => {
       this.closed = true;
-      logger.debug('OpenAI Realtime WS closed', { code, reason: reason.toString() });
+      logger.info('[STT] upstream OpenAI WS closed', { code, reason: reason.toString() });
       this.cb.onClose();
     });
   }
@@ -162,6 +163,7 @@ export class OpenAIRealtimeConnection {
         if (this.currentItemId !== itemId) {
           this.currentItemId = itemId;
           this.finalStartedAt = Date.now();
+          logger.info('[STT] new utterance starting', { itemId });
         }
         if (delta) this.cb.onPartial(delta);
         break;
