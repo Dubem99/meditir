@@ -62,6 +62,11 @@ export const useAudioRecorder = (
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunkBufRef = useRef<Blob[]>([]);
+  // Wall-clock anchor for the recording session. All `startMs` values sent to
+  // the server are OFFSETS from this anchor, not Unix timestamps. The
+  // Transcription.startMs column is INT4 (~2.1B max) so absolute timestamps
+  // would overflow.
+  const recordingStartedAtRef = useRef<number>(0);
   const chunkStartMsRef = useRef<number>(0);
   const onSegmentRef = useRef<(segment: TranscriptSegment) => void>(() => {});
   const stopRequestedRef = useRef(false);
@@ -76,17 +81,24 @@ export const useAudioRecorder = (
     typeof (window as typeof window & { MediaRecorder?: typeof MediaRecorder }).MediaRecorder !== 'undefined';
 
   const flushChunkToServer = useCallback(
-    async (blob: Blob, startMs: number) => {
+    async (blob: Blob, chunkStartedAt: number) => {
       if (!options?.sessionId) return;
       if (blob.size === 0) return;
+
+      // startMs in the schema is the OFFSET from the start of recording.
+      // Sending an absolute Date.now() value overflows the INT4 column.
+      const offsetMs = Math.max(
+        0,
+        chunkStartedAt - (recordingStartedAtRef.current || chunkStartedAt)
+      );
 
       const form = new FormData();
       const mime = blob.type || 'audio/webm';
       const ext = mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm';
-      form.append('audio', blob, `chunk-${startMs}.${ext}`);
+      form.append('audio', blob, `chunk-${offsetMs}.${ext}`);
       form.append('sessionId', options.sessionId);
       form.append('dialect', dialectRef.current);
-      form.append('startMs', String(startMs));
+      form.append('startMs', String(offsetMs));
       form.append('speakerTag', 'DOCTOR');
 
       try {
@@ -161,6 +173,8 @@ export const useAudioRecorder = (
       });
 
       const chunkMs = options.chunkMs ?? DEFAULT_CHUNK_MS;
+      // Anchor the session — chunk offsets are computed relative to this.
+      recordingStartedAtRef.current = Date.now();
       let chunkStart = Date.now();
       chunkStartMsRef.current = chunkStart;
 
