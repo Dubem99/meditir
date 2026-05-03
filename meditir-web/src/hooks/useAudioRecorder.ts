@@ -126,9 +126,30 @@ export const useAudioRecorder = (
         hasToken: !!token,
       });
 
-      // Ensure socket is connected
+      // Ensure socket is connected — and wait for the handshake to actually
+      // complete before we emit. socket.io's auto-buffer for pre-connect
+      // emits is unreliable in some browser conditions.
       const sock = connectSocket();
-      console.log('[STT-client] socket connected?', sock.connected, 'id:', sock.id);
+      if (!sock.connected) {
+        console.log('[STT-client] socket not yet connected, waiting...');
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              sock.off('connect', onConnect);
+              reject(new Error('Socket connection timed out after 8s'));
+            }, 8000);
+            const onConnect = () => {
+              clearTimeout(timer);
+              resolve();
+            };
+            sock.once('connect', onConnect);
+          });
+        } catch (err) {
+          setError(`Could not connect: ${(err as Error).message}`);
+          return;
+        }
+      }
+      console.log('[STT-client] socket connected? ', sock.connected, 'id:', sock.id);
 
       // Set up listeners BEFORE emitting start so we don't miss early events.
       const onPartial = ({ text: delta }: { text: string }) => {
