@@ -14,12 +14,46 @@ import { logger } from '../../utils/logger';
 
 const OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?intent=transcription';
 
-const dialectToLanguage: Record<Dialect, string> = {
-  NIGERIAN_ENGLISH: 'en',
+// Maps each dialect to the ISO-639-1 hint we send to OpenAI's
+// transcription_session.update. PIDGIN intentionally omits a hint (handled
+// separately below) — Whisper has no Pidgin language code, and forcing
+// 'en' for Pidgin garbles distinctively non-English Pidgin grammar. Letting
+// the model auto-detect per utterance gives better results.
+const dialectToLanguage: Partial<Record<Dialect, string>> = {
+  ENGLISH: 'en',
+  NIGERIAN_ENGLISH: 'en', // legacy
   YORUBA_ACCENTED: 'yo',
   HAUSA_ACCENTED: 'ha',
   IGBO_ACCENTED: 'ig',
+  // PIDGIN: deliberately not mapped — falls through to auto-detect.
 };
+
+// Vocabulary-biasing prompt sent to gpt-4o-transcribe via the `prompt` field
+// in transcription_session.update.input_audio_transcription. This is OpenAI's
+// supported way to nudge recognition toward specific terms — particularly
+// useful for medical jargon and Nigerian-specific drug names that the model
+// otherwise mis-hears (e.g. "Coartem" → "core item").
+const NIGERIAN_MEDICAL_VOCAB = [
+  // Common labs / tests
+  'FBC', 'PCV', 'ESR', 'WBC', 'MP', 'BF', 'RDT', 'RBS', 'FBS', 'HbA1c', '2HPP',
+  'LFT', 'E/U/Cr', 'Urinalysis', 'HVS', 'PSA', 'HBsAg', 'HCV', 'VDRL', 'RVS',
+  'ECG', 'CXR', 'USS', 'CT', 'MRI',
+  // Drugs commonly prescribed in Nigeria
+  'Paracetamol', 'Amoxicillin', 'Augmentin', 'Ciprofloxacin', 'Metronidazole',
+  'Artemether-lumefantrine', 'Coartem', 'Lonart', 'Amalar', 'Sulfadoxine-pyrimethamine',
+  'Folic acid', 'Ferrous sulphate', 'Ranferon', 'ORS', 'Oral rehydration solution',
+  'Lisinopril', 'Amlodipine', 'Hydrochlorothiazide', 'Methyldopa', 'Aldomet',
+  'Metformin', 'Glibenclamide', 'Insulin',
+  // Conditions / dx
+  'Plasmodium falciparum', 'Malaria parasite', 'Sickle cell', 'HbSS', 'HbAS',
+  'Hypertension', 'Diabetes mellitus', 'Pneumonia', 'Otitis media', 'URTI',
+  'Gastroenteritis', 'Typhoid', 'Tuberculosis', 'HIV',
+  // Antenatal / paeds
+  'Antenatal', 'IPTp', 'Tetanus toxoid', 'Booking visit', 'Fundal height',
+  'Fetal heart rate', 'Gestational age', 'EDD', 'LMP', 'G2P1', 'Meconium',
+  // Common Nigerian healthcare phrases
+  'Pikin', 'Wahala', 'Pain dey', 'NHIA', 'NHIS', 'HMO',
+].join(', ');
 
 // Synthetic value sent by the browser when the doctor picks "Auto-detect" —
 // we omit the language hint so OpenAI's model auto-detects per utterance.
@@ -76,11 +110,19 @@ export class OpenAIRealtimeConnection {
       // For AUTO_DETECT we omit `language` entirely — OpenAI then runs its
       // language-detection on each utterance. Costs a small accuracy hit on
       // low-resource African languages but handles code-switching well.
-      const transcription: { model: string; language?: string } = {
+      const transcription: { model: string; language?: string; prompt?: string } = {
         model: config.OPENAI_TRANSCRIBE_MODEL,
+        // Bias recognition toward Nigerian medical vocabulary. This is the
+        // OpenAI-supported way to nudge the model on domain-specific terms
+        // and noticeably improves drug/condition names that would otherwise
+        // be mis-heard.
+        prompt: NIGERIAN_MEDICAL_VOCAB,
       };
-      if (this.dialect !== AUTO_DETECT_DIALECT) {
-        transcription.language = dialectToLanguage[this.dialect as Dialect] ?? 'en';
+      // Send a language hint when we have one. PIDGIN and AUTO_DETECT both
+      // fall through to OpenAI's per-utterance language detection.
+      if (this.dialect !== AUTO_DETECT_DIALECT && this.dialect !== 'PIDGIN') {
+        const code = dialectToLanguage[this.dialect as Dialect];
+        if (code) transcription.language = code;
       }
       this.send({
         type: 'transcription_session.update',

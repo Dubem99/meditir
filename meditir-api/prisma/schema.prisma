@@ -47,10 +47,12 @@ enum SyncStatus {
 }
 
 enum Dialect {
-  NIGERIAN_ENGLISH
+  NIGERIAN_ENGLISH // legacy — read-only; new sessions use ENGLISH or PIDGIN
   YORUBA_ACCENTED
   HAUSA_ACCENTED
   IGBO_ACCENTED
+  ENGLISH
+  PIDGIN
 }
 
 enum ProblemStatus {

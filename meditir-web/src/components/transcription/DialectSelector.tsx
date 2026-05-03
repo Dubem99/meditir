@@ -21,9 +21,14 @@ const OPTIONS: DialectOption[] = [
     description: 'Recognise and adapt to whichever language is spoken — best for code-switching visits',
   },
   {
-    id: 'NIGERIAN_ENGLISH',
-    name: 'Nigerian English',
-    description: 'Optimised for English consultations with Nigerian accents',
+    id: 'ENGLISH',
+    name: 'English',
+    description: 'Optimised for consultations conducted in English',
+  },
+  {
+    id: 'PIDGIN',
+    name: 'Pidgin',
+    description: 'Optimised for consultations in Nigerian Pidgin',
   },
   {
     id: 'YORUBA_ACCENTED',
@@ -91,5 +96,8 @@ export const DialectSelector = ({ value, onChange, disabled }: Props) => (
 
 export const dialectChoiceLabel = (d: DialectChoice): string => {
   const o = OPTIONS.find((x) => x.id === d);
-  return o ? o.name : 'Auto-detect';
+  if (o) return o.name;
+  // Legacy NIGERIAN_ENGLISH from older sessions — display as English.
+  if (d === 'NIGERIAN_ENGLISH') return 'English';
+  return 'Auto-detect';
 };

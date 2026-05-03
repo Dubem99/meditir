@@ -33,10 +33,12 @@ export enum SyncStatus {
 }
 
 export enum Dialect {
-  NIGERIAN_ENGLISH = 'NIGERIAN_ENGLISH',
+  NIGERIAN_ENGLISH = 'NIGERIAN_ENGLISH', // legacy
   YORUBA_ACCENTED = 'YORUBA_ACCENTED',
   HAUSA_ACCENTED = 'HAUSA_ACCENTED',
   IGBO_ACCENTED = 'IGBO_ACCENTED',
+  ENGLISH = 'ENGLISH',
+  PIDGIN = 'PIDGIN',
 }
 
 export enum AuditAction {

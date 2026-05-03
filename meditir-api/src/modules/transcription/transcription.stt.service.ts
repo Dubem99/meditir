@@ -34,10 +34,12 @@ const getClient = (): OpenAI => {
 // - Yoruba ('yo'), Hausa ('ha'), Igbo ('ig') are all in OpenAI's supported
 //   language list. Igbo coverage is weakest but still better than auto-detect.
 const dialectToLanguage: Record<Dialect, string> = {
-  NIGERIAN_ENGLISH: 'en',
+  NIGERIAN_ENGLISH: 'en', // legacy
   YORUBA_ACCENTED: 'yo',
   HAUSA_ACCENTED: 'ha',
   IGBO_ACCENTED: 'ig',
+  ENGLISH: 'en',
+  PIDGIN: 'en', // no Whisper code for Pidgin; English hint is least-bad fallback
 };
 
 export interface TranscribeResult {

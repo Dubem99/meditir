@@ -2,7 +2,13 @@ export type Role = 'SUPER_ADMIN' | 'HOSPITAL_ADMIN' | 'DOCTOR' | 'PATIENT';
 export type Gender = 'MALE' | 'FEMALE' | 'OTHER' | 'PREFER_NOT_TO_SAY';
 export type SessionStatus = 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 export type NoteStatus = 'DRAFT' | 'AI_GENERATED' | 'DOCTOR_REVIEWED' | 'FINALIZED';
-export type Dialect = 'NIGERIAN_ENGLISH' | 'YORUBA_ACCENTED' | 'HAUSA_ACCENTED' | 'IGBO_ACCENTED';
+export type Dialect =
+  | 'NIGERIAN_ENGLISH' // legacy, still appears in older session rows
+  | 'YORUBA_ACCENTED'
+  | 'HAUSA_ACCENTED'
+  | 'IGBO_ACCENTED'
+  | 'ENGLISH'
+  | 'PIDGIN';
 
 export interface Hospital {
   id: string;

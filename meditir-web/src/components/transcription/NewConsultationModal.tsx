@@ -32,7 +32,7 @@ export const NewConsultationModal = ({ onClose }: Props) => {
         id: demoSessionId,
         patient: { id: 'p1', firstName, lastName, medicalRecordNo: '' },
         status: 'IN_PROGRESS',
-        dialect: 'NIGERIAN_ENGLISH',
+        dialect: 'ENGLISH',
         roomToken: 'demo-room',
         scheduledAt: new Date().toISOString(),
         doctor: { id: 'd1', firstName: 'Demo', lastName: 'Doctor', specialization: 'General Practice' },
@@ -49,7 +49,7 @@ export const NewConsultationModal = ({ onClose }: Props) => {
     try {
       const res = await api.post('/sessions', {
         patientId,
-        dialect: 'NIGERIAN_ENGLISH',
+        dialect: 'ENGLISH',
         scheduledAt: new Date().toISOString(),
       });
       router.push(`/doctor/sessions/${res.data.data.id}`);
