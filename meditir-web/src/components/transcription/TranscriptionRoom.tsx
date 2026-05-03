@@ -38,25 +38,32 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
 
   const transcriptions = useSessionStore((s) => s.transcriptions);
   const { isOnline } = useOfflineSync(session.id);
-  const { isRecording, startTranscription, stopTranscription, error, isSupported, interimText } = useTranscription(
-    session.id,
-    session.roomToken!,
-    dialect
-  );
+  const {
+    isRecording,
+    isPaused,
+    audioLevel,
+    startTranscription,
+    pauseTranscription,
+    resumeTranscription,
+    stopTranscription,
+    error,
+    isSupported,
+    interimText,
+  } = useTranscription(session.id, session.roomToken!, dialect);
 
-  // Timer
+  // Timer — counts active recording time only (excludes paused).
   useEffect(() => {
-    if (!isRecording) return;
+    if (!isRecording || isPaused) return;
     const interval = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(interval);
-  }, [isRecording]);
+  }, [isRecording, isPaused]);
 
   // Auto-scroll transcript on new final segments and interim updates
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcriptions, interimText]);
 
-  // Spacebar toggles recording (ignore if focused in an input)
+  // Spacebar — start | pause | resume cycle (ignored in inputs)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.code !== 'Space') return;
@@ -64,12 +71,17 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
       e.preventDefault();
       if (!isSupported) return;
-      if (isRecording) stopTranscription();
-      else startTranscription();
+      if (!isRecording) {
+        startTranscription();
+      } else if (isPaused) {
+        resumeTranscription();
+      } else {
+        pauseTranscription();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isRecording, isSupported, startTranscription, stopTranscription]);
+  }, [isRecording, isPaused, isSupported, startTranscription, pauseTranscription, resumeTranscription]);
 
   const handleEnd = async () => {
     setIsEndingSession(true);
@@ -248,52 +260,93 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
                 : 'border-gray-200'
             }`}
           >
-            {/* Duration */}
+            {/* Duration + state pill */}
             <div className="text-center">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-1">
-                {isRecording ? 'Recording' : 'Ready'}
+                {isRecording ? (isPaused ? 'Paused' : 'Recording') : 'Ready'}
               </p>
               <p
                 className={`text-4xl font-bold tabular-nums ${
-                  isRecording ? 'text-red-500' : 'text-gray-300'
+                  isRecording && !isPaused
+                    ? 'text-red-500'
+                    : isPaused
+                    ? 'text-amber-500'
+                    : 'text-gray-300'
                 }`}
               >
                 {formatTime(elapsed)}
               </p>
             </div>
 
-            {/* Record button */}
+            {/* Record / Pause / Resume button */}
             {!isRecording ? (
               <button
                 onClick={startTranscription}
                 disabled={!isSupported}
                 className="relative w-24 h-24 rounded-full bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white flex items-center justify-center shadow-xl hover:shadow-2xl transition-all active:scale-95"
+                aria-label="Start recording"
               >
                 <svg className="h-10 w-10" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 15c1.66 0 3-1.34 3-3V6c0-1.66-1.34-3-3-3S9 4.34 9 6v6c0 1.66 1.34 3 3 3z" />
                   <path d="M17 12c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-2.08c3.39-.49 6-3.39 6-6.92h-2z" />
                 </svg>
               </button>
+            ) : isPaused ? (
+              <div className="relative">
+                <div className="absolute inset-0 rounded-full bg-amber-300 opacity-40 blur-md" />
+                <button
+                  onClick={resumeTranscription}
+                  className="relative w-24 h-24 rounded-full bg-amber-500 hover:bg-amber-600 text-white flex items-center justify-center shadow-xl transition-all active:scale-95"
+                  aria-label="Resume recording"
+                >
+                  <svg className="h-10 w-10" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </button>
+              </div>
             ) : (
               <div className="relative">
-                <div className="absolute inset-0 rounded-full bg-red-400 animate-ping opacity-30" />
+                {/* Reactive halo: scales with audio level so doctor can see mic is hearing them */}
+                <div
+                  className="absolute inset-0 rounded-full bg-red-400 transition-transform duration-75"
+                  style={{
+                    transform: `scale(${1 + audioLevel * 0.35})`,
+                    opacity: 0.25 + audioLevel * 0.4,
+                  }}
+                />
                 <div className="absolute -inset-2 rounded-full border-2 border-red-300 animate-pulse" />
                 <button
-                  onClick={stopTranscription}
+                  onClick={pauseTranscription}
                   className="relative w-24 h-24 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-xl transition-all active:scale-95"
+                  aria-label="Pause recording"
                 >
-                  <span className="w-7 h-7 bg-white rounded-md" />
+                  <svg className="h-9 w-9" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="5" width="4" height="14" rx="1" />
+                    <rect x="14" y="5" width="4" height="14" rx="1" />
+                  </svg>
                 </button>
+              </div>
+            )}
+
+            {/* Audio level meter — only while actively recording (not paused) */}
+            {isRecording && !isPaused && (
+              <div className="w-full max-w-[180px] h-1 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-red-300 via-red-500 to-red-600 transition-all duration-75"
+                  style={{ width: `${Math.round(audioLevel * 100)}%` }}
+                />
               </div>
             )}
 
             <div className="text-center">
               <p className="text-sm text-gray-500">
                 {!isSupported
-                  ? 'Use Chrome or Edge to record'
-                  : isRecording
-                  ? 'Tap to stop'
-                  : 'Tap to start recording'}
+                  ? 'Use Chrome, Edge, Safari, or Firefox to record'
+                  : !isRecording
+                  ? 'Tap to start recording'
+                  : isPaused
+                  ? 'Paused — tap to resume'
+                  : 'Tap to pause'}
               </p>
               {isSupported && (
                 <p className="text-[10px] text-gray-400 mt-1">

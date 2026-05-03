@@ -30,6 +30,9 @@ interface RealtimeContext {
   speakerTag: string;
   recordingStartedAt: number;
   roomToken: string | null;
+  // When true we drop audio frames on the floor instead of forwarding to
+  // OpenAI. Keeps the upstream WS alive so resume is instant.
+  paused: boolean;
 }
 
 export const registerTranscriptionHandlers = (io: Server, socket: Socket): void => {
@@ -247,6 +250,7 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
         speakerTag: 'DOCTOR',
         recordingStartedAt,
         roomToken,
+        paused: false,
       };
       logger.info('[STT] opening upstream OpenAI Realtime WS', { sessionId: session.id, dialect });
       conn.open();
@@ -263,19 +267,29 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
   // mono before sending.
   let audioFrameCount = 0;
   socket.on('transcribe:audio', (chunk: ArrayBuffer | Buffer) => {
-    if (!rt) {
-      if (audioFrameCount === 0) {
-        logger.warn('[STT] transcribe:audio received but no rt context — was start emitted?');
-      }
-      return;
-    }
+    if (!rt) return;
+    if (rt.paused) return; // drop audio while paused
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     if (buf.length === 0) return;
     audioFrameCount++;
-    if (audioFrameCount === 1 || audioFrameCount % 50 === 0) {
+    if (audioFrameCount === 1 || audioFrameCount % 200 === 0) {
       logger.info('[STT] audio frames forwarded', { count: audioFrameCount, lastBytes: buf.length });
     }
     rt.conn.appendAudio(buf.toString('base64'));
+  });
+
+  socket.on('transcribe:pause', () => {
+    if (!rt) return;
+    rt.paused = true;
+    logger.info('[STT] transcribe:pause', { sessionId: rt.sessionId });
+    socket.emit('transcribe:paused');
+  });
+
+  socket.on('transcribe:resume', () => {
+    if (!rt) return;
+    rt.paused = false;
+    logger.info('[STT] transcribe:resume', { sessionId: rt.sessionId });
+    socket.emit('transcribe:resumed');
   });
 
   socket.on('transcribe:stop', () => {

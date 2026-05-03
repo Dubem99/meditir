@@ -41,11 +41,9 @@ export const useTranscription = (
   // restart when isOnline / dialect change.
   const handleSegmentRef = useRef<(s: TranscriptSegment) => void>(() => {});
   handleSegmentRef.current = ({ text, isFinal, transcription }) => {
-    console.log('[STT-ui] handleSegment', { isFinal, textLen: text?.length, hasTranscription: !!transcription });
     if (!text) return;
 
     if (!isFinal) {
-      console.log('[STT-ui] setInterimText →', text.slice(0, 60));
       setInterimText(text);
       return;
     }
@@ -100,9 +98,23 @@ export const useTranscription = (
     setRecording(false);
   }, [recorder, setRecording]);
 
+  const pauseTranscription = useCallback(() => {
+    void recorder.pauseRecording();
+    setRecording(false);
+  }, [recorder, setRecording]);
+
+  const resumeTranscription = useCallback(() => {
+    void recorder.resumeRecording();
+    setRecording(true);
+  }, [recorder, setRecording]);
+
   return {
     isRecording: recorder.isRecording,
+    isPaused: recorder.isPaused,
+    audioLevel: recorder.audioLevel,
     startTranscription,
+    pauseTranscription,
+    resumeTranscription,
     stopTranscription,
     error: recorder.error,
     isSupported: recorder.isSupported,

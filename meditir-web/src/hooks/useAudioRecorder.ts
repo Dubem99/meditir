@@ -11,10 +11,10 @@ import type { Dialect, Transcription } from '@/types/entities.types';
 // partial transcripts (word-by-word feel) plus a saved Transcription row
 // when each utterance completes.
 //
-// Browser audio chain:
-//   getUserMedia → MediaStreamSource → AudioWorkletNode(pcm-worklet)
-//                                          ↓ posts Int16 ArrayBuffer
-//                                   socket.emit('transcribe:audio', buf)
+// Pause/resume design: pause RELEASES the microphone (mic LED off, patient-
+// visible privacy signal). Resume re-acquires. The OpenAI WS stays open
+// across pauses so resume is instant. Audio level meter pulses while
+// recording for clinician confidence.
 
 export interface TranscriptSegment {
   text: string;
@@ -24,7 +24,12 @@ export interface TranscriptSegment {
 
 export interface UseAudioRecorderReturn {
   isRecording: boolean;
-  startRecording: (onSegment: (segment: TranscriptSegment) => void) => void;
+  isPaused: boolean;
+  // 0..1 RMS level updated ~30x/sec while recording; 0 while paused.
+  audioLevel: number;
+  startRecording: (onSegment: (segment: TranscriptSegment) => void) => Promise<void>;
+  pauseRecording: () => Promise<void>;
+  resumeRecording: () => Promise<void>;
   stopRecording: () => void;
   error: string | null;
   isSupported: boolean;
@@ -34,28 +39,32 @@ interface AudioRecorderOptions {
   sessionId: string;
 }
 
-const TARGET_SAMPLE_RATE = 24_000; // OpenAI Realtime Transcription expects pcm16 24kHz mono
+const TARGET_SAMPLE_RATE = 24_000;
 
 export const useAudioRecorder = (
   dialect: Dialect = 'NIGERIAN_ENGLISH',
   options?: AudioRecorderOptions
 ): UseAudioRecorderReturn => {
   const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const workletRef = useRef<AudioWorkletNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const levelRafRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const onSegmentRef = useRef<(segment: TranscriptSegment) => void>(() => {});
   const dialectRef = useRef<Dialect>(dialect);
   dialectRef.current = dialect;
 
-  // Listeners attached during start, removed on stop. Holding refs lets us
-  // remove the exact same function references later.
+  // Listeners attached during start, removed on stop.
   const partialListenerRef = useRef<((p: { text: string }) => void) | null>(null);
   const finalListenerRef = useRef<((p: { transcription: Transcription }) => void) | null>(null);
   const errorListenerRef = useRef<((p: { message: string }) => void) | null>(null);
+  const readyListenerRef = useRef<(() => void) | null>(null);
   const closedListenerRef = useRef<(() => void) | null>(null);
 
   // Accumulates delta text across one utterance. Reset on final.
@@ -68,23 +77,50 @@ export const useAudioRecorder = (
     'getUserMedia' in navigator.mediaDevices &&
     typeof (window as typeof window & { AudioContext?: typeof AudioContext }).AudioContext !== 'undefined';
 
-  const cleanup = useCallback(() => {
-    const sock = getSocket();
+  // ─── Mic chain (reusable across pause/resume) ──────────────────────
 
-    // Detach socket listeners
-    if (partialListenerRef.current) sock.off('transcribe:partial', partialListenerRef.current);
-    if (finalListenerRef.current) sock.off('transcribe:final', finalListenerRef.current);
-    if (errorListenerRef.current) sock.off('transcribe:error', errorListenerRef.current);
-    if (closedListenerRef.current) sock.off('transcribe:closed', closedListenerRef.current);
-    partialListenerRef.current = null;
-    finalListenerRef.current = null;
-    errorListenerRef.current = null;
-    closedListenerRef.current = null;
+  const startLevelMeter = useCallback(() => {
+    const analyser = analyserRef.current;
+    if (!analyser) return;
+    const buf = new Uint8Array(analyser.fftSize);
+    const tick = () => {
+      if (!analyserRef.current) {
+        levelRafRef.current = null;
+        return;
+      }
+      analyserRef.current.getByteTimeDomainData(buf);
+      // RMS over the time-domain buffer, normalised 0..1.
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buf.length);
+      // Boost a bit so soft speech is visible — RMS rarely exceeds ~0.3 for voice.
+      setAudioLevel(Math.min(1, rms * 3));
+      levelRafRef.current = requestAnimationFrame(tick);
+    };
+    levelRafRef.current = requestAnimationFrame(tick);
+  }, []);
 
+  const stopLevelMeter = useCallback(() => {
+    if (levelRafRef.current != null) {
+      cancelAnimationFrame(levelRafRef.current);
+      levelRafRef.current = null;
+    }
+    setAudioLevel(0);
+  }, []);
+
+  const releaseMic = useCallback(() => {
+    stopLevelMeter();
     if (workletRef.current) {
       try { workletRef.current.disconnect(); } catch { /* ignore */ }
       workletRef.current.port.onmessage = null;
       workletRef.current = null;
+    }
+    if (analyserRef.current) {
+      try { analyserRef.current.disconnect(); } catch { /* ignore */ }
+      analyserRef.current = null;
     }
     if (sourceRef.current) {
       try { sourceRef.current.disconnect(); } catch { /* ignore */ }
@@ -95,18 +131,85 @@ export const useAudioRecorder = (
       audioContextRef.current = null;
     }
     if (streamRef.current) {
+      // Stopping all tracks turns off the mic LED — privacy signal to the
+      // patient that audio is no longer being captured.
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    currentInterimRef.current = '';
-  }, []);
+  }, [stopLevelMeter]);
+
+  // Acquires microphone, sets up the audio chain, starts forwarding PCM
+  // frames to the server. Returns true on success, false on failure (with
+  // setError already called).
+  const acquireMic = useCallback(async (): Promise<boolean> => {
+    if (!isSupported) {
+      setError('Audio recording is not supported in this browser. Use Chrome, Edge, Safari, or Firefox.');
+      return false;
+    }
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+    } catch (err) {
+      const e = err as { name?: string; message?: string };
+      if (e?.name === 'NotAllowedError') {
+        setError('Microphone access denied — grant permission in your browser settings.');
+      } else {
+        setError(`Could not access microphone: ${e?.message ?? 'unknown error'}`);
+      }
+      return false;
+    }
+    streamRef.current = stream;
+
+    const Ctx = (window as typeof window & {
+      AudioContext: typeof AudioContext;
+      webkitAudioContext?: typeof AudioContext;
+    }).AudioContext;
+    const ctx = new Ctx({ sampleRate: TARGET_SAMPLE_RATE });
+    audioContextRef.current = ctx;
+
+    try {
+      await ctx.audioWorklet.addModule('/pcm-worklet.js');
+    } catch (err) {
+      setError(`Failed to load audio worklet: ${(err as Error).message}`);
+      releaseMic();
+      return false;
+    }
+
+    const source = ctx.createMediaStreamSource(stream);
+    sourceRef.current = source;
+
+    // Analyser fans off from the source for the level meter — doesn't affect
+    // what's sent to the worklet/server.
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.4;
+    analyserRef.current = analyser;
+    source.connect(analyser);
+
+    const worklet = new AudioWorkletNode(ctx, 'pcm-worklet');
+    workletRef.current = worklet;
+
+    const sock = getSocket();
+    worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+      if (sock.connected) sock.emit('transcribe:audio', event.data);
+    };
+
+    source.connect(worklet);
+    startLevelMeter();
+    return true;
+  }, [isSupported, releaseMic, startLevelMeter]);
+
+  // ─── Public API ────────────────────────────────────────────────────
 
   const startRecording = useCallback(
     async (onSegment: (segment: TranscriptSegment) => void) => {
-      if (!isSupported) {
-        setError('Audio recording is not supported in this browser. Use Chrome, Edge, Safari, or Firefox.');
-        return;
-      }
       if (!options?.sessionId) {
         setError('Missing sessionId — cannot start transcription.');
         return;
@@ -120,18 +223,10 @@ export const useAudioRecorder = (
       onSegmentRef.current = onSegment;
       setError(null);
 
-      console.log('[STT-client] startRecording invoked', {
-        sessionId: options.sessionId,
-        dialect: dialectRef.current,
-        hasToken: !!token,
-      });
-
-      // Ensure socket is connected — and wait for the handshake to actually
-      // complete before we emit. socket.io's auto-buffer for pre-connect
-      // emits is unreliable in some browser conditions.
+      // Wait for socket handshake — pre-connect emits don't always replay
+      // reliably in the wild.
       const sock = connectSocket();
       if (!sock.connected) {
-        console.log('[STT-client] socket not yet connected, waiting...');
         try {
           await new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => {
@@ -149,128 +244,108 @@ export const useAudioRecorder = (
           return;
         }
       }
-      console.log('[STT-client] socket connected? ', sock.connected, 'id:', sock.id);
 
-      // Set up listeners BEFORE emitting start so we don't miss early events.
+      // Listeners — attached BEFORE we emit start so we don't miss events.
       const onPartial = ({ text: delta }: { text: string }) => {
-        console.log('[STT-client] partial:', delta);
         if (!delta) return;
         currentInterimRef.current += delta;
         onSegmentRef.current({ text: currentInterimRef.current, isFinal: false });
       };
       const onFinal = ({ transcription }: { transcription: Transcription }) => {
-        console.log('[STT-client] final:', transcription?.text);
         currentInterimRef.current = '';
         if (transcription && transcription.text) {
-          onSegmentRef.current({
-            text: transcription.text,
-            isFinal: true,
-            transcription,
-          });
+          onSegmentRef.current({ text: transcription.text, isFinal: true, transcription });
         }
       };
       const onErrorEvt = ({ message }: { message: string }) => {
-        console.log('[STT-client] error from server:', message);
         setError(`STT error: ${message}`);
       };
-      const onReady = () => {
-        console.log('[STT-client] server emitted transcribe:ready');
-      };
-      const onClosed = () => {
-        console.log('[STT-client] server emitted transcribe:closed');
-      };
-      sock.on('transcribe:ready', onReady);
+      const onReady = () => { /* hook for future readiness UI */ };
+      const onClosed = () => { /* upstream closed — keep mic until user stops */ };
 
       sock.on('transcribe:partial', onPartial);
       sock.on('transcribe:final', onFinal);
       sock.on('transcribe:error', onErrorEvt);
+      sock.on('transcribe:ready', onReady);
       sock.on('transcribe:closed', onClosed);
       partialListenerRef.current = onPartial;
       finalListenerRef.current = onFinal;
       errorListenerRef.current = onErrorEvt;
+      readyListenerRef.current = onReady;
       closedListenerRef.current = onClosed;
 
-      console.log('[STT-client] emitting transcribe:start');
       sock.emit('transcribe:start', {
         accessToken: token,
         sessionId: options.sessionId,
         dialect: dialectRef.current,
       });
-      // Also confirm we have at least one server response after a delay.
-      setTimeout(() => {
-        console.log('[STT-client] 2s after emit — socket.connected:', sock.connected, 'id:', sock.id);
-      }, 2000);
 
-      // Mic capture
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
-      } catch (err) {
-        const e = err as { name?: string; message?: string };
-        if (e?.name === 'NotAllowedError') {
-          setError('Microphone access denied — grant permission in your browser settings.');
-        } else {
-          setError(`Could not access microphone: ${e?.message ?? 'unknown error'}`);
-        }
-        cleanup();
+      const ok = await acquireMic();
+      if (!ok) {
         sock.emit('transcribe:stop');
         return;
       }
-      streamRef.current = stream;
-
-      // AudioContext at 24 kHz so the browser does the resampling for us.
-      const Ctx = (window as typeof window & {
-        AudioContext: typeof AudioContext;
-        webkitAudioContext?: typeof AudioContext;
-      }).AudioContext;
-      const ctx = new Ctx({ sampleRate: TARGET_SAMPLE_RATE });
-      audioContextRef.current = ctx;
-
-      try {
-        await ctx.audioWorklet.addModule('/pcm-worklet.js');
-      } catch (err) {
-        setError(`Failed to load audio worklet: ${(err as Error).message}`);
-        cleanup();
-        sock.emit('transcribe:stop');
-        return;
-      }
-
-      const source = ctx.createMediaStreamSource(stream);
-      sourceRef.current = source;
-
-      const worklet = new AudioWorkletNode(ctx, 'pcm-worklet');
-      workletRef.current = worklet;
-
-      worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-        // Forward raw PCM16 little-endian bytes. socket.io will frame this as
-        // a binary attachment — Node side receives a Buffer.
-        if (sock.connected) {
-          sock.emit('transcribe:audio', event.data);
-        }
-      };
-
-      source.connect(worklet);
-      // Don't connect to ctx.destination — we don't want to play the mic back
-      // through the speakers. The worklet still pulls input as long as the
-      // source is connected to it.
-
       setIsRecording(true);
+      setIsPaused(false);
     },
-    [isSupported, options, cleanup]
+    [options, acquireMic]
   );
+
+  const pauseRecording = useCallback(async () => {
+    if (!isRecording || isPaused) return;
+    const sock = getSocket();
+    if (sock.connected) sock.emit('transcribe:pause');
+    // Release the mic — privacy signal (mic LED turns off).
+    releaseMic();
+    currentInterimRef.current = '';
+    setIsPaused(true);
+  }, [isRecording, isPaused, releaseMic]);
+
+  const resumeRecording = useCallback(async () => {
+    if (!isRecording || !isPaused) return;
+    const sock = getSocket();
+    if (sock.connected) sock.emit('transcribe:resume');
+    const ok = await acquireMic();
+    if (!ok) {
+      // Couldn't re-acquire (perm revoked, device gone). Treat as full stop.
+      if (sock.connected) sock.emit('transcribe:stop');
+      setIsRecording(false);
+      setIsPaused(false);
+      return;
+    }
+    setIsPaused(false);
+  }, [isRecording, isPaused, acquireMic]);
 
   const stopRecording = useCallback(() => {
     const sock = getSocket();
     if (sock.connected) sock.emit('transcribe:stop');
-    cleanup();
-    setIsRecording(false);
-  }, [cleanup]);
 
-  return { isRecording, startRecording, stopRecording, error, isSupported };
+    if (partialListenerRef.current) sock.off('transcribe:partial', partialListenerRef.current);
+    if (finalListenerRef.current) sock.off('transcribe:final', finalListenerRef.current);
+    if (errorListenerRef.current) sock.off('transcribe:error', errorListenerRef.current);
+    if (readyListenerRef.current) sock.off('transcribe:ready', readyListenerRef.current);
+    if (closedListenerRef.current) sock.off('transcribe:closed', closedListenerRef.current);
+    partialListenerRef.current = null;
+    finalListenerRef.current = null;
+    errorListenerRef.current = null;
+    readyListenerRef.current = null;
+    closedListenerRef.current = null;
+
+    releaseMic();
+    currentInterimRef.current = '';
+    setIsRecording(false);
+    setIsPaused(false);
+  }, [releaseMic]);
+
+  return {
+    isRecording,
+    isPaused,
+    audioLevel,
+    startRecording,
+    pauseRecording,
+    resumeRecording,
+    stopRecording,
+    error,
+    isSupported,
+  };
 };
