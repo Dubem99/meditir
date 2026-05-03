@@ -30,30 +30,53 @@ const dialectToLanguage: Partial<Record<Dialect, string>> = {
 
 // Vocabulary-biasing prompt sent to gpt-4o-transcribe via the `prompt` field
 // in transcription_session.update.input_audio_transcription. This is OpenAI's
-// supported way to nudge recognition toward specific terms — particularly
-// useful for medical jargon and Nigerian-specific drug names that the model
-// otherwise mis-hears (e.g. "Coartem" → "core item").
-const NIGERIAN_MEDICAL_VOCAB = [
-  // Common labs / tests
+// supported way to nudge recognition toward specific terms.
+//
+// Two separate lists, picked per session based on language:
+//
+//   UNIVERSAL — terms doctors say identically in any language: drug brand
+//   names, lab abbreviations, internationally-shared medical terminology.
+//   Even when consultations are in Yoruba/Hausa/Igbo, doctors still say
+//   "FBC", "Coartem", "malaria" in English. This list helps every language.
+//
+//   ENGLISH_PHRASES — Nigerian-English & Pidgin specific phrasing. Mixing
+//   this into a Yoruba/Hausa/Igbo session would bias the model toward
+//   English-sounding interpretations of non-English audio, hurting
+//   accuracy. Sent only for ENGLISH or PIDGIN sessions.
+const UNIVERSAL_MEDICAL_VOCAB = [
+  // Lab abbreviations — said in English universally
   'FBC', 'PCV', 'ESR', 'WBC', 'MP', 'BF', 'RDT', 'RBS', 'FBS', 'HbA1c', '2HPP',
   'LFT', 'E/U/Cr', 'Urinalysis', 'HVS', 'PSA', 'HBsAg', 'HCV', 'VDRL', 'RVS',
   'ECG', 'CXR', 'USS', 'CT', 'MRI',
-  // Drugs commonly prescribed in Nigeria
+  // Drug brand names — said identically in any language
   'Paracetamol', 'Amoxicillin', 'Augmentin', 'Ciprofloxacin', 'Metronidazole',
-  'Artemether-lumefantrine', 'Coartem', 'Lonart', 'Amalar', 'Sulfadoxine-pyrimethamine',
-  'Folic acid', 'Ferrous sulphate', 'Ranferon', 'ORS', 'Oral rehydration solution',
-  'Lisinopril', 'Amlodipine', 'Hydrochlorothiazide', 'Methyldopa', 'Aldomet',
-  'Metformin', 'Glibenclamide', 'Insulin',
-  // Conditions / dx
-  'Plasmodium falciparum', 'Malaria parasite', 'Sickle cell', 'HbSS', 'HbAS',
-  'Hypertension', 'Diabetes mellitus', 'Pneumonia', 'Otitis media', 'URTI',
-  'Gastroenteritis', 'Typhoid', 'Tuberculosis', 'HIV',
-  // Antenatal / paeds
-  'Antenatal', 'IPTp', 'Tetanus toxoid', 'Booking visit', 'Fundal height',
-  'Fetal heart rate', 'Gestational age', 'EDD', 'LMP', 'G2P1', 'Meconium',
-  // Common Nigerian healthcare phrases
-  'Pikin', 'Wahala', 'Pain dey', 'NHIA', 'NHIS', 'HMO',
+  'Artemether-lumefantrine', 'Coartem', 'Lonart', 'Amalar',
+  'Sulfadoxine-pyrimethamine', 'Folic acid', 'Ferrous sulphate', 'Ranferon',
+  'ORS', 'Lisinopril', 'Amlodipine', 'Hydrochlorothiazide', 'Methyldopa',
+  'Aldomet', 'Metformin', 'Glibenclamide', 'Insulin',
+  // International medical terms — also said in English in code-switched visits
+  'Plasmodium falciparum', 'malaria parasite', 'sickle cell', 'HbSS', 'HbAS',
+  'hypertension', 'diabetes mellitus', 'pneumonia', 'otitis media', 'URTI',
+  'gastroenteritis', 'typhoid', 'tuberculosis', 'HIV',
+  'antenatal', 'IPTp', 'tetanus toxoid', 'fundal height', 'fetal heart rate',
+  'gestational age', 'EDD', 'LMP', 'G2P1', 'meconium',
+  // System / billing context
+  'NHIA', 'NHIS', 'HMO',
 ].join(', ');
+
+const ENGLISH_PHRASES = [
+  'oral rehydration solution', 'booking visit',
+  'pikin', 'wahala', 'pain dey', 'belle dey worry me',
+].join(', ');
+
+const buildVocabPrompt = (dialect: DialectInput): string => {
+  if (dialect === 'ENGLISH' || dialect === 'PIDGIN') {
+    return `${UNIVERSAL_MEDICAL_VOCAB}. ${ENGLISH_PHRASES}.`;
+  }
+  // For Yoruba / Hausa / Igbo / Auto-detect: only universal terms. Avoids
+  // biasing the model toward English when the audio is in another language.
+  return UNIVERSAL_MEDICAL_VOCAB;
+};
 
 // Synthetic value sent by the browser when the doctor picks "Auto-detect" —
 // we omit the language hint so OpenAI's model auto-detects per utterance.
@@ -112,11 +135,9 @@ export class OpenAIRealtimeConnection {
       // low-resource African languages but handles code-switching well.
       const transcription: { model: string; language?: string; prompt?: string } = {
         model: config.OPENAI_TRANSCRIBE_MODEL,
-        // Bias recognition toward Nigerian medical vocabulary. This is the
-        // OpenAI-supported way to nudge the model on domain-specific terms
-        // and noticeably improves drug/condition names that would otherwise
-        // be mis-heard.
-        prompt: NIGERIAN_MEDICAL_VOCAB,
+        // Vocabulary biasing — language-aware so we don't drag a Yoruba
+        // session toward English-sounding interpretations.
+        prompt: buildVocabPrompt(this.dialect),
       };
       // Send a language hint when we have one. PIDGIN and AUTO_DETECT both
       // fall through to OpenAI's per-utterance language detection.
