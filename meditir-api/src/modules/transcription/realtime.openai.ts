@@ -154,6 +154,15 @@ export class OpenAIRealtimeConnection {
     const type = msg.type as string | undefined;
     if (!type) return;
 
+    // Log everything except high-frequency delta events for visibility.
+    if (type !== 'conversation.item.input_audio_transcription.delta') {
+      logger.info('[STT] upstream event', {
+        type,
+        // Include error details and any other interesting fields verbatim.
+        snapshot: JSON.stringify(msg).slice(0, 800),
+      });
+    }
+
     switch (type) {
       // Streaming partial transcript. Each delta is appended to the current
       // utterance — the doctor sees text fill in word-by-word.
