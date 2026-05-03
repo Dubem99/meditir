@@ -120,16 +120,25 @@ export const useAudioRecorder = (
       onSegmentRef.current = onSegment;
       setError(null);
 
+      console.log('[STT-client] startRecording invoked', {
+        sessionId: options.sessionId,
+        dialect: dialectRef.current,
+        hasToken: !!token,
+      });
+
       // Ensure socket is connected
       const sock = connectSocket();
+      console.log('[STT-client] socket connected?', sock.connected, 'id:', sock.id);
 
       // Set up listeners BEFORE emitting start so we don't miss early events.
       const onPartial = ({ text: delta }: { text: string }) => {
+        console.log('[STT-client] partial:', delta);
         if (!delta) return;
         currentInterimRef.current += delta;
         onSegmentRef.current({ text: currentInterimRef.current, isFinal: false });
       };
       const onFinal = ({ transcription }: { transcription: Transcription }) => {
+        console.log('[STT-client] final:', transcription?.text);
         currentInterimRef.current = '';
         if (transcription && transcription.text) {
           onSegmentRef.current({
@@ -140,12 +149,16 @@ export const useAudioRecorder = (
         }
       };
       const onErrorEvt = ({ message }: { message: string }) => {
+        console.log('[STT-client] error from server:', message);
         setError(`STT error: ${message}`);
       };
-      const onClosed = () => {
-        // Server-initiated close. Keep the audio chain alive in case the user
-        // is still trying to record — but surface the state.
+      const onReady = () => {
+        console.log('[STT-client] server emitted transcribe:ready');
       };
+      const onClosed = () => {
+        console.log('[STT-client] server emitted transcribe:closed');
+      };
+      sock.on('transcribe:ready', onReady);
 
       sock.on('transcribe:partial', onPartial);
       sock.on('transcribe:final', onFinal);
@@ -156,11 +169,16 @@ export const useAudioRecorder = (
       errorListenerRef.current = onErrorEvt;
       closedListenerRef.current = onClosed;
 
+      console.log('[STT-client] emitting transcribe:start');
       sock.emit('transcribe:start', {
         accessToken: token,
         sessionId: options.sessionId,
         dialect: dialectRef.current,
       });
+      // Also confirm we have at least one server response after a delay.
+      setTimeout(() => {
+        console.log('[STT-client] 2s after emit — socket.connected:', sock.connected, 'id:', sock.id);
+      }, 2000);
 
       // Mic capture
       let stream: MediaStream;
