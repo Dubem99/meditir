@@ -20,6 +20,17 @@ export interface CorrectionsAnalytics {
     manualAddRate: number | null;
     swapRate: number | null;
   };
+  // Transcription-edit metrics — privacy-preserving STT accuracy proxy.
+  // No raw transcript text is read; only the diff stats stored in
+  // TranscriptionEdit rows.
+  transcription: {
+    totalEdits: number;
+    totalTranscriptions: number;
+    untouchedRate: number | null; // share of transcriptions never edited
+    avgWordsChangedPerEdit: number | null;
+    byDialect: { dialect: string; edits: number; transcriptions: number; editRate: number | null }[];
+    byEditType: Record<string, number>;
+  };
 }
 
 const isoWeek = (d: Date): string => {
@@ -132,6 +143,54 @@ export const getCorrectionsAnalytics = async (
     swapRate: ratio(byKind.CODE_SWAP ?? 0, totalBillingCodes || 1),
   };
 
+  // Transcription edit metrics — read only the stat columns, never raw text.
+  const editRows = await prisma.transcriptionEdit.findMany({
+    where: { createdAt: { gte: cutoff } },
+    select: {
+      dialect: true,
+      editType: true,
+      wordsAdded: true,
+      wordsRemoved: true,
+      transcriptionId: true,
+    },
+  });
+  const totalTranscriptions = await prisma.transcription.count({
+    where: { createdAt: { gte: cutoff } },
+  });
+  const transcriptionsEditedSet = new Set(editRows.map((r) => r.transcriptionId));
+  const untouched = Math.max(0, totalTranscriptions - transcriptionsEditedSet.size);
+  const totalEdits = editRows.length;
+  const totalWordsChanged = editRows.reduce((s, r) => s + r.wordsAdded + r.wordsRemoved, 0);
+
+  const byEditType: Record<string, number> = {};
+  for (const r of editRows) {
+    byEditType[r.editType] = (byEditType[r.editType] ?? 0) + 1;
+  }
+
+  // Per-dialect roll-up: edits and transcriptions counted per dialect, plus
+  // an "edit rate" (edits per transcription) as the rough STT-accuracy proxy.
+  const dialects = ['ENGLISH', 'PIDGIN', 'NIGERIAN_ENGLISH', 'YORUBA_ACCENTED', 'HAUSA_ACCENTED', 'IGBO_ACCENTED'];
+  const byDialect = await Promise.all(
+    dialects.map(async (d) => {
+      const transcriptions = await prisma.transcription.count({
+        where: { createdAt: { gte: cutoff }, dialect: d as never },
+      });
+      const edits = editRows.filter((r) => r.dialect === d).length;
+      const editRate = transcriptions > 0 ? Math.round((edits / transcriptions) * 1000) / 1000 : null;
+      return { dialect: d, edits, transcriptions, editRate };
+    })
+  );
+
+  const transcription = {
+    totalEdits,
+    totalTranscriptions,
+    untouchedRate: ratio(untouched, totalTranscriptions || 1),
+    avgWordsChangedPerEdit:
+      totalEdits > 0 ? Math.round((totalWordsChanged / totalEdits) * 100) / 100 : null,
+    byDialect: byDialect.filter((d) => d.transcriptions > 0 || d.edits > 0),
+    byEditType,
+  };
+
   return {
     windowDays,
     generatedAt,
@@ -143,5 +202,6 @@ export const getCorrectionsAnalytics = async (
     weeklyTrend,
     perHospitalAnonymized,
     insights,
+    transcription,
   };
 };

@@ -8,6 +8,7 @@ interface SessionState {
   transcriptions: Transcription[];
   setActiveSession: (sessionId: string, roomToken: string) => void;
   addTranscription: (t: Transcription) => void;
+  updateTranscription: (id: string, text: string) => void;
   setRecording: (isRecording: boolean) => void;
   clearSession: () => void;
 }
@@ -23,6 +24,11 @@ export const useSessionStore = create<SessionState>((set) => ({
 
   addTranscription: (t) =>
     set((state) => ({ transcriptions: [...state.transcriptions, t] })),
+
+  updateTranscription: (id, text) =>
+    set((state) => ({
+      transcriptions: state.transcriptions.map((t) => (t.id === id ? { ...t, text } : t)),
+    })),
 
   setRecording: (isRecording) => set({ isRecording }),
 

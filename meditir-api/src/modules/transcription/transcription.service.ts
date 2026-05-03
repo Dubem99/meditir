@@ -3,6 +3,43 @@ import { AppError } from '../../utils/AppError';
 import { Dialect, SyncStatus } from '../../types/enums';
 import { logger } from '../../utils/logger';
 
+// Compute the SHAPE of a text edit without retaining the text itself. Used
+// by the privacy-preserving TranscriptionEdit log — gives us proxy metrics
+// for transcription accuracy (per-language word-change rate, drift over
+// time) without storing PHI for a secondary purpose.
+const wordCount = (s: string): number => {
+  const trimmed = s.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
+};
+
+const editStats = (original: string, edited: string) => {
+  const o = original ?? '';
+  const e = edited ?? '';
+  const oWords = wordCount(o);
+  const eWords = wordCount(e);
+  const charsAdded = Math.max(0, e.length - o.length);
+  const charsRemoved = Math.max(0, o.length - e.length);
+  const wordsAdded = Math.max(0, eWords - oWords);
+  const wordsRemoved = Math.max(0, oWords - eWords);
+
+  let editType: 'INSERTION' | 'DELETION' | 'REPLACEMENT' | 'NO_OP';
+  if (o === e) editType = 'NO_OP';
+  else if (o.length === 0) editType = 'INSERTION';
+  else if (e.length === 0) editType = 'DELETION';
+  else editType = 'REPLACEMENT';
+
+  return {
+    editType,
+    charsAdded,
+    charsRemoved,
+    wordsAdded,
+    wordsRemoved,
+    originalLength: o.length,
+    editedLength: e.length,
+  };
+};
+
 /**
  * Save a single real-time transcription segment via REST (reliable fallback to Socket.io).
  */
@@ -45,6 +82,60 @@ export const saveSegment = async (
       startMs: data.startMs ?? null,
       syncStatus: SyncStatus.SYNCED,
     },
+  });
+};
+
+/**
+ * Edit a single transcription's text. Records the SHAPE of the edit (no PHI
+ * text) to TranscriptionEdit for accuracy analytics.
+ */
+export const editTranscription = async (
+  id: string,
+  hospitalId: string,
+  newText: string,
+  doctorUserId?: string
+) => {
+  const trimmed = (newText ?? '').trim();
+  if (!trimmed) throw new AppError('Edited text cannot be empty', 400);
+
+  // Verify the transcription belongs to a session in this hospital.
+  const existing = await prisma.transcription.findFirst({
+    where: {
+      id,
+      session: { hospitalId },
+    },
+  });
+  if (!existing) throw new AppError('Transcription not found', 404);
+
+  const stats = editStats(existing.text, trimmed);
+  if (stats.editType === 'NO_OP') {
+    return existing; // nothing to do
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.transcription.update({
+      where: { id },
+      data: { text: trimmed },
+    });
+
+    // Stats-only audit row — no PHI text retained. NDPA-compliant by design.
+    await tx.transcriptionEdit.create({
+      data: {
+        transcriptionId: id,
+        hospitalId,
+        doctorUserId: doctorUserId ?? null,
+        editType: stats.editType,
+        charsAdded: stats.charsAdded,
+        charsRemoved: stats.charsRemoved,
+        wordsAdded: stats.wordsAdded,
+        wordsRemoved: stats.wordsRemoved,
+        originalLength: stats.originalLength,
+        editedLength: stats.editedLength,
+        dialect: existing.dialect,
+      },
+    });
+
+    return updated;
   });
 };
 

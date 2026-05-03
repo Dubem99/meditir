@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import * as service from './transcription.service';
 import { transcribeAudioChunk } from './transcription.stt.service';
-import { hospitalId } from '../../utils/params';
+import { hospitalId, param } from '../../utils/params';
 import { AppError } from '../../utils/AppError';
 import { Dialect } from '../../types/enums';
 
@@ -72,6 +72,19 @@ export const getTranscript = async (req: Request, res: Response): Promise<void> 
     : req.params.sessionId;
   const transcriptions = await service.getSessionTranscript(sessionId, hospitalId(req));
   res.json({ status: 'success', data: transcriptions });
+};
+
+export const editSegment = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new AppError('Authentication required', 401);
+  const text = (req.body?.text ?? '').toString();
+  if (!text.trim()) throw new AppError('text is required', 400);
+  const updated = await service.editTranscription(
+    param(req, 'id'),
+    hospitalId(req),
+    text,
+    req.user.id
+  );
+  res.json({ status: 'success', data: updated });
 };
 
 export const offlineSync = async (req: Request, res: Response): Promise<void> => {

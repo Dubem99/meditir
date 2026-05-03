@@ -13,6 +13,7 @@ router.use(authenticate, resolveTenant);
 
 router.post('/segment', requireRole(Role.DOCTOR), asyncHandler(controller.saveSegment));
 router.post('/stream', requireRole(Role.DOCTOR), audioChunkUpload, asyncHandler(controller.streamTranscribe));
+router.patch('/:id', requireRole(Role.DOCTOR), asyncHandler(controller.editSegment));
 router.get('/session/:sessionId', requireRole(Role.DOCTOR, Role.HOSPITAL_ADMIN), asyncHandler(controller.getTranscript));
 router.post('/offline-sync', requireRole(Role.DOCTOR), asyncHandler(controller.offlineSync));
 

@@ -21,7 +21,24 @@ interface Analytics {
     manualAddRate: number | null;
     swapRate: number | null;
   };
+  transcription?: {
+    totalEdits: number;
+    totalTranscriptions: number;
+    untouchedRate: number | null;
+    avgWordsChangedPerEdit: number | null;
+    byDialect: { dialect: string; edits: number; transcriptions: number; editRate: number | null }[];
+    byEditType: Record<string, number>;
+  };
 }
+
+const DIALECT_LABEL: Record<string, string> = {
+  ENGLISH: 'English',
+  PIDGIN: 'Pidgin',
+  NIGERIAN_ENGLISH: 'NG English (legacy)',
+  YORUBA_ACCENTED: 'Yoruba',
+  HAUSA_ACCENTED: 'Hausa',
+  IGBO_ACCENTED: 'Igbo',
+};
 
 const WINDOW_OPTIONS = [7, 30, 90];
 
@@ -189,6 +206,78 @@ export default function CorrectionsAnalyticsPage() {
               )}
             </div>
           </Card>
+
+          {/* Transcription accuracy proxy */}
+          {data.transcription && (
+            <Card padding="none">
+              <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900 text-sm">Transcription quality (stats only — no PHI)</h3>
+                <span className="text-xs text-gray-400 tabular-nums">
+                  {data.transcription.totalEdits} edits · {data.transcription.totalTranscriptions} transcriptions
+                </span>
+              </div>
+              <div className="p-5 space-y-5">
+                {/* Headline ratios */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Untouched rate</p>
+                    <p className="text-2xl font-bold text-emerald-700 tabular-nums">{fmtPercent(data.transcription.untouchedRate)}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">never edited</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Avg words / edit</p>
+                    <p className="text-2xl font-bold text-amber-700 tabular-nums">
+                      {data.transcription.avgWordsChangedPerEdit ?? '—'}
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">added + removed</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-400">Replacements</p>
+                    <p className="text-2xl font-bold text-rose-700 tabular-nums">
+                      {data.transcription.byEditType.REPLACEMENT ?? 0}
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">most common error type</p>
+                  </div>
+                </div>
+
+                {/* Per-language edit rate */}
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-400 mb-2">By language</p>
+                  {data.transcription.byDialect.length === 0 ? (
+                    <p className="text-xs text-gray-400">No transcript data yet.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {data.transcription.byDialect.map((d) => {
+                        const pct = d.editRate != null ? d.editRate * 100 : 0;
+                        return (
+                          <div key={d.dialect} className="flex items-center gap-3 text-xs">
+                            <span className="text-gray-700 font-medium w-32 truncate">
+                              {DIALECT_LABEL[d.dialect] ?? d.dialect}
+                            </span>
+                            <div className="flex-1 h-5 bg-gray-100 rounded relative overflow-hidden">
+                              <div
+                                className="absolute inset-y-0 left-0 bg-amber-400"
+                                style={{ width: `${Math.min(100, pct)}%` }}
+                              />
+                            </div>
+                            <span className="font-mono tabular-nums text-gray-600 w-16 text-right">
+                              {d.editRate != null ? `${pct.toFixed(1)}%` : '—'}
+                            </span>
+                            <span className="font-mono tabular-nums text-gray-400 w-20 text-right">
+                              {d.edits}/{d.transcriptions}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-gray-400 mt-3">
+                    Edit rate = transcript edits ÷ transcriptions per language. Lower is better. Treat as a rough STT quality proxy.
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
 
           <p className="text-xs text-gray-400">
             Generated {new Date(data.generatedAt).toLocaleString()} · Access logged to AuditLog ·

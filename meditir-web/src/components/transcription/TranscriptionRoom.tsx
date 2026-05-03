@@ -347,9 +347,14 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
             ) : (
               <>
                 {transcriptions.map((t) => (
-                  <p key={t.id} className="text-sm text-gray-800 leading-relaxed">
-                    {t.text}
-                  </p>
+                  <EditableTranscriptLine
+                    key={t.id}
+                    transcriptionId={t.id}
+                    text={t.text}
+                    onUpdated={(newText) =>
+                      useSessionStore.getState().updateTranscription(t.id, newText)
+                    }
+                  />
                 ))}
                 {interimText && (
                   <p className="text-sm text-gray-400 leading-relaxed italic">
@@ -423,3 +428,116 @@ const ToolbarPill = ({
     <ChevronDown className="shrink-0 opacity-60" />
   </button>
 );
+
+// Inline-editable transcript line. Click the pencil to edit, save submits to
+// the server which logs the edit shape (no PHI text retained for analytics).
+const EditableTranscriptLine = ({
+  transcriptionId,
+  text,
+  onUpdated,
+}: {
+  transcriptionId: string;
+  text: string;
+  onUpdated: (newText: string) => void;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Don't try to edit local-only segments (offline placeholders).
+  const isPersisted = !transcriptionId.startsWith('offline-') && !transcriptionId.startsWith('local-');
+
+  const startEdit = () => {
+    if (!isPersisted) return;
+    setDraft(text);
+    setError(null);
+    setEditing(true);
+  };
+
+  const cancel = () => {
+    setEditing(false);
+    setDraft(text);
+    setError(null);
+  };
+
+  const save = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      setError('Cannot be empty');
+      return;
+    }
+    if (trimmed === text) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patch(`/transcriptions/${transcriptionId}`, { text: trimmed });
+      onUpdated(trimmed);
+      setEditing(false);
+    } catch (err) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      setError(e?.response?.data?.message ?? e?.message ?? 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="group">
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') cancel();
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
+          }}
+          className="w-full text-sm text-gray-800 leading-relaxed bg-white border border-primary-300 rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary-100 resize-y min-h-[60px]"
+          rows={Math.min(6, Math.max(2, Math.ceil(draft.length / 60)))}
+        />
+        <div className="flex items-center gap-2 mt-1">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="text-[11px] font-medium text-primary-700 hover:text-primary-800 disabled:opacity-40"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            onClick={cancel}
+            disabled={saving}
+            className="text-[11px] text-gray-400 hover:text-gray-600"
+          >
+            Cancel
+          </button>
+          <span className="text-[10px] text-gray-300 ml-auto">
+            ⌘/Ctrl+Enter to save · Esc to cancel
+          </span>
+        </div>
+        {error && <p className="text-[11px] text-red-600 mt-1">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex items-start gap-2">
+      <p className="text-sm text-gray-800 leading-relaxed flex-1">{text}</p>
+      {isPersisted && (
+        <button
+          onClick={startEdit}
+          aria-label="Edit transcript line"
+          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-700 transition-opacity shrink-0"
+          title="Edit"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+};

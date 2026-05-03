@@ -372,8 +372,40 @@ model Transcription {
   syncStatus SyncStatus @default(SYNCED)
   createdAt  DateTime   @default(now())
 
+  edits      TranscriptionEdit[]
+
   @@index([sessionId])
   @@map("transcriptions")
+}
+
+// Privacy-preserving edit log: tracks the SHAPE of every doctor correction
+// to a transcription (chars/words changed, edit type) but never the raw text
+// of the original or edited content. Lets us compute STT accuracy proxy
+// metrics (per-language word-change rate, edits-per-session, drift over
+// time) without storing PHI for a secondary purpose.
+model TranscriptionEdit {
+  id              String   @id @default(uuid())
+  transcriptionId String
+  transcription   Transcription @relation(fields: [transcriptionId], references: [id], onDelete: Cascade)
+  hospitalId      String
+  doctorUserId    String?
+
+  editType       String  // INSERTION | DELETION | REPLACEMENT | NO_OP
+  charsAdded     Int     @default(0)
+  charsRemoved   Int     @default(0)
+  wordsAdded     Int     @default(0)
+  wordsRemoved   Int     @default(0)
+  originalLength Int
+  editedLength   Int
+
+  dialect        Dialect
+
+  createdAt      DateTime @default(now())
+
+  @@index([hospitalId, createdAt])
+  @@index([dialect, createdAt])
+  @@index([transcriptionId])
+  @@map("transcription_edits")
 }
 
 // ─────────────────────────────────────────────
