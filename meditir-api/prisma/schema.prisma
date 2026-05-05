@@ -340,6 +340,12 @@ model ConsultationSession {
   handoverNote         String?
   originalDoctorId     String?
 
+  // Last error from auto-SOAP generation, surfaced to the doctor in the UI so
+  // they can see *why* the note didn't generate (empty transcript, Claude API
+  // failure, etc). Cleared at the start of each generate attempt; remains null
+  // on success.
+  noteGenerationError  String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -84,6 +84,13 @@ export const generateSOAPNote = async (sessionId: string, hospitalId: string) =>
     throw new AppError('This SOAP note has been finalized and cannot be regenerated', 400);
   }
 
+  // Clear any prior generation error before we start. If this attempt fails the
+  // callers re-set it; if it succeeds it stays null and the UI shows the note.
+  await prisma.consultationSession.update({
+    where: { id: sessionId },
+    data: { noteGenerationError: null },
+  });
+
   // Fetch last 2 finalized notes for this patient (for clinical continuity)
   const previousNotes = await prisma.sOAPNote.findMany({
     where: {

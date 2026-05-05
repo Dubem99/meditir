@@ -93,6 +93,7 @@ export interface ConsultationSession {
   templateId?: string | null;
   handoverNote?: string;
   originalDoctorId?: string;
+  noteGenerationError?: string | null;
   doctor: { id: string; firstName: string; lastName: string; specialization: string };
   patient: {
     id: string;

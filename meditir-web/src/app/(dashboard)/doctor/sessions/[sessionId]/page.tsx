@@ -34,6 +34,7 @@ export default function SessionPage() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'room' | 'note' | 'ehr' | 'avs' | 'chat' | 'generating' | 'generate-failed'>('room');
   const [retrying, setRetrying] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
 
   // Handover state
   const [showHandover, setShowHandover] = useState(false);
@@ -144,18 +145,46 @@ export default function SessionPage() {
           const noteRes = await api.get(`/soap-notes/${updated.soapNote.id}`);
           setSOAPNote(noteRes.data.data);
           setSession(updated);
+          setGenError(null);
           setView('note');
           clearInterval(poll);
+          return;
+        }
+        // Server persists generation errors on the session — surface them
+        // immediately instead of waiting for the poll budget to expire.
+        if (updated.noteGenerationError) {
+          setGenError(updated.noteGenerationError);
+          setView('generate-failed');
+          clearInterval(poll);
+          return;
         }
       } catch {}
-      if (attempts > 15) { clearInterval(poll); setView('generate-failed'); }
+      // 60 × 2s = 120s — Claude Sonnet routinely takes 30-60s, plus retries.
+      if (attempts > 60) {
+        clearInterval(poll);
+        setGenError('Generation is taking unusually long. The server may still be working — try refreshing in a minute, or retry below.');
+        setView('generate-failed');
+      }
     }, 2000);
   };
 
   const handleRetryGenerate = async () => {
     setRetrying(true);
+    setGenError(null);
     setView('generating');
-    try { await api.post('/soap-notes/generate', { sessionId }); } catch {}
+    try {
+      await api.post('/soap-notes/generate', { sessionId });
+    } catch (err) {
+      // The synchronous /soap-notes/generate endpoint surfaces validation
+      // failures (empty transcript, finalized note, Claude API failure) right
+      // here — don't poll for them, just show the message and stop.
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      const msg = e?.response?.data?.message || e?.message || 'Failed to generate note';
+      setGenError(msg);
+      setView('generate-failed');
+      setRetrying(false);
+      return;
+    }
     let attempts = 0;
     const poll = setInterval(async () => {
       attempts++;
@@ -166,11 +195,23 @@ export default function SessionPage() {
           const noteRes = await api.get(`/soap-notes/${updated.soapNote.id}`);
           setSOAPNote(noteRes.data.data);
           setSession(updated);
+          setGenError(null);
           setView('note');
           clearInterval(poll);
+          return;
+        }
+        if (updated.noteGenerationError) {
+          setGenError(updated.noteGenerationError);
+          setView('generate-failed');
+          clearInterval(poll);
+          return;
         }
       } catch {}
-      if (attempts > 15) { clearInterval(poll); setView('generate-failed'); }
+      if (attempts > 60) {
+        clearInterval(poll);
+        setGenError('Generation is taking unusually long. The server may still be working — try refreshing in a minute, or retry below.');
+        setView('generate-failed');
+      }
     }, 2000);
     setRetrying(false);
   };
@@ -428,7 +469,7 @@ export default function SessionPage() {
             </div>
             <h3 className="font-semibold text-gray-900 mb-2">Generating Clinical Note</h3>
             <p className="text-sm text-gray-500">
-              Claude AI is analyzing the consultation transcript and generating your SOAP note. This takes about 30 seconds.
+              Claude AI is analyzing the consultation transcript and generating your SOAP note. This usually takes 30–60 seconds; longer for detailed consultations.
             </p>
           </div>
         )}
@@ -441,8 +482,13 @@ export default function SessionPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h3 className="font-semibold text-gray-900 mb-2">Note Generation Timed Out</h3>
-            <p className="text-sm text-gray-500 mb-6">The SOAP note is taking longer than expected. You can retry or generate it manually.</p>
+            <h3 className="font-semibold text-gray-900 mb-2">
+              {genError ? 'Couldn’t Generate Note' : 'Note Generation Timed Out'}
+            </h3>
+            <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">
+              {genError
+                ?? 'The SOAP note is taking longer than expected. You can retry or generate it manually.'}
+            </p>
             <button
               onClick={handleRetryGenerate}
               disabled={retrying}

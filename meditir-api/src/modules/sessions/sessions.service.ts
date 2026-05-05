@@ -184,10 +184,18 @@ export const endSession = async (id: string, hospitalId: string, doctorUserId: s
     include: sessionIncludes,
   });
 
-  // Auto-generate SOAP note in background — the frontend polls for it
-  generateSOAPNote(id, hospitalId).catch((err) =>
-    logger.error('Auto SOAP generation failed (non-fatal)', { error: err, sessionId: id })
-  );
+  // Auto-generate SOAP note in background — the frontend polls for it.
+  // On failure we persist the error message on the session so the UI can
+  // surface *why* (empty transcript, Claude API failure, etc) instead of
+  // a generic timeout. The fire-and-forget update is wrapped in its own
+  // catch so a logging-write failure can never crash the process.
+  generateSOAPNote(id, hospitalId).catch(async (err) => {
+    logger.error('Auto SOAP generation failed (non-fatal)', { error: err, sessionId: id });
+    const message = (err as { message?: string })?.message ?? 'Note generation failed';
+    await prisma.consultationSession
+      .update({ where: { id }, data: { noteGenerationError: message.slice(0, 500) } })
+      .catch(() => {});
+  });
 
   return updated;
 };
