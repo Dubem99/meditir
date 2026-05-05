@@ -72,6 +72,7 @@ export const generateSOAPNote = async (sessionId: string, hospitalId: string) =>
     where: { id: sessionId, hospitalId },
     include: {
       transcriptions: { orderBy: { startMs: 'asc' } },
+      additionalNotes: { orderBy: { createdAt: 'asc' }, select: { text: true } },
       patient: { select: { id: true, firstName: true, lastName: true, allergies: true, chronicConditions: true } },
     },
   });
@@ -102,8 +103,10 @@ export const generateSOAPNote = async (sessionId: string, hospitalId: string) =>
 
   // Reject truly empty sessions before calling Claude — a SOAP note from nothing
   // is meaningless and leads to "Not documented" placeholders in every section.
+  // Either the transcript or the doctor's additional notes can satisfy this.
   const meaningfulText = transcriptText.replace(/\s+/g, ' ').trim();
-  if (meaningfulText.length < 20) {
+  const notesText = session.additionalNotes.map((n) => n.text).join(' ').replace(/\s+/g, ' ').trim();
+  if (meaningfulText.length + notesText.length < 20) {
     throw new AppError(
       'This session has no recorded transcript to generate a note from. Record a consultation or add notes manually first.',
       400
@@ -117,9 +120,19 @@ export const generateSOAPNote = async (sessionId: string, hospitalId: string) =>
       }).join('\n\n')}\n`
     : '';
 
+  // Doctor-typed additional context attached to this session. Not part of the
+  // transcript — these are deliberate notes the doctor wants Claude to weigh
+  // when drafting the SOAP. We surface them as a distinct section so the model
+  // doesn't confuse them with patient-spoken content.
+  const additionalNotesSection = session.additionalNotes.length > 0
+    ? `\nDoctor's additional context (typed by the clinician, not from the consultation audio):\n${session.additionalNotes
+        .map((n, i) => `${i + 1}. ${n.text}`)
+        .join('\n')}\n`
+    : '';
+
   const patientContext = `Patient: ${session.patient.firstName} ${session.patient.lastName}
 Known allergies: ${session.patient.allergies.join(', ') || 'None documented'}
-Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None documented'}${historySection}`;
+Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None documented'}${historySection}${additionalNotesSection}`;
 
   // Pick the template prompt for this session (default = general practice).
   const template = getTemplate(session.templateId);

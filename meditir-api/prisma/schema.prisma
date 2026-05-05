@@ -343,14 +343,33 @@ model ConsultationSession {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  transcriptions Transcription[]
-  soapNote       SOAPNote?
+  transcriptions  Transcription[]
+  additionalNotes AdditionalNote[]
+  soapNote        SOAPNote?
 
   @@index([hospitalId])
   @@index([doctorId])
   @@index([patientId])
   @@index([status])
   @@map("consultation_sessions")
+}
+
+// Doctor-typed context entries attached to a session — observations the
+// doctor wants in the note that weren't said aloud (silent BP reading,
+// non-verbal exam findings, prior knowledge, etc). Fed into SOAP generation
+// as additional input alongside the transcript.
+model AdditionalNote {
+  id           String @id @default(uuid())
+  sessionId    String
+  session      ConsultationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  hospitalId   String
+  doctorUserId String
+  text         String
+  createdAt    DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+  @@index([hospitalId])
+  @@map("additional_notes")
 }
 
 // ─────────────────────────────────────────────

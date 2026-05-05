@@ -9,6 +9,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { DialectSelector, dialectChoiceLabel } from './DialectSelector';
 import type { DialectChoice } from './DialectSelector';
 import { TemplateSelector } from './TemplateSelector';
+import { AdditionalNotesPanel } from './AdditionalNotesPanel';
 import type { ConsultationSession, NoteTemplate } from '@/types/entities.types';
 import { api } from '@/lib/api';
 
@@ -43,7 +44,8 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
   const [templateName, setTemplateName] = useState<string>('General Practice');
   const [isEndingSession, setIsEndingSession] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [activeSheet, setActiveSheet] = useState<'dialect' | 'template' | 'transcript' | null>(null);
+  const [activeSheet, setActiveSheet] = useState<'dialect' | 'template' | 'transcript' | 'notes' | null>(null);
+  const [notesCount, setNotesCount] = useState(0);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   const transcriptions = useSessionStore((s) => s.transcriptions);
@@ -326,6 +328,15 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
         </div>
       )}
 
+      {activeSheet === 'notes' && (
+        <div className="mb-4">
+          <AdditionalNotesPanel
+            sessionId={session.id}
+            onCountChange={setNotesCount}
+          />
+        </div>
+      )}
+
       {activeSheet === 'transcript' && (
         <div className="mb-4 bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
@@ -384,7 +395,13 @@ export const TranscriptionRoom = ({ session, onSessionEnd }: Props) => {
           onClick={() => setActiveSheet(activeSheet === 'dialect' ? null : 'dialect')}
         />
         <ToolbarPill
-          label={transcriptions.length > 0 || interimText ? 'Transcript' : 'Transcript'}
+          label="Notes"
+          value={notesCount > 0 ? `${notesCount}` : 'Add'}
+          active={activeSheet === 'notes'}
+          onClick={() => setActiveSheet(activeSheet === 'notes' ? null : 'notes')}
+        />
+        <ToolbarPill
+          label="Transcript"
           value={
             activeSheet === 'transcript'
               ? 'Hide'
