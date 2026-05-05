@@ -13,6 +13,7 @@ const router = Router();
 router.use(authenticate, resolveTenant);
 
 router.post('/generate', requireRole(Role.DOCTOR), validate(GenerateSOAPSchema), asyncHandler(controller.generate));
+router.post('/stream/:sessionId', requireRole(Role.DOCTOR), asyncHandler(controller.streamGenerate));
 router.get('/my-notes', requireRole(Role.PATIENT), asyncHandler(controller.listMyNotes));
 router.get('/:id', requireRole(Role.DOCTOR, Role.PATIENT, Role.HOSPITAL_ADMIN), asyncHandler(controller.get));
 router.patch('/:id', requireRole(Role.DOCTOR), validate(UpdateSOAPSchema), asyncHandler(controller.update));

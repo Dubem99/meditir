@@ -3,8 +3,6 @@ import { prisma } from '../../config/database';
 import { AppError } from '../../utils/AppError';
 import { SessionStatus } from '../../types/enums';
 import { getPaginationParams, paginate } from '../../utils/pagination';
-import { generateSOAPNote } from '../soap-notes/soap-notes.service';
-import { logger } from '../../utils/logger';
 import { pickDefaultTemplate, getTemplate } from '../../data/note-templates';
 import type { CreateSessionInput, UpdateSessionInput } from './sessions.schema';
 
@@ -184,19 +182,10 @@ export const endSession = async (id: string, hospitalId: string, doctorUserId: s
     include: sessionIncludes,
   });
 
-  // Auto-generate SOAP note in background — the frontend polls for it.
-  // On failure we persist the error message on the session so the UI can
-  // surface *why* (empty transcript, Claude API failure, etc) instead of
-  // a generic timeout. The fire-and-forget update is wrapped in its own
-  // catch so a logging-write failure can never crash the process.
-  generateSOAPNote(id, hospitalId).catch(async (err) => {
-    logger.error('Auto SOAP generation failed (non-fatal)', { error: err, sessionId: id });
-    const message = (err as { message?: string })?.message ?? 'Note generation failed';
-    await prisma.consultationSession
-      .update({ where: { id }, data: { noteGenerationError: message.slice(0, 500) } })
-      .catch(() => {});
-  });
-
+  // Generation is owned by the client's streaming endpoint
+  // (POST /soap-notes/stream/:sessionId) — see soap-notes.controller.streamGenerate.
+  // We no longer kick off a background generation here; the client opens the
+  // stream right after end-session so the doctor sees Claude's output live.
   return updated;
 };
 

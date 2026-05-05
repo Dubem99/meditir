@@ -14,6 +14,9 @@ import { Spinner } from '@/components/ui/Spinner';
 import { useSessionStore } from '@/store/session.store';
 import type { ConsultationSession, Doctor, SOAPNote, EhrExtractions } from '@/types/entities.types';
 import { format } from 'date-fns';
+import { streamSOAPNote, type SOAPSections } from '@/lib/streamSOAP';
+
+const EMPTY_SECTIONS: SOAPSections = { subjective: '', objective: '', assessment: '', plan: '' };
 
 const formatDuration = (startedAt?: string, endedAt?: string) => {
   if (!startedAt || !endedAt) return null;
@@ -35,6 +38,7 @@ export default function SessionPage() {
   const [view, setView] = useState<'room' | 'note' | 'ehr' | 'avs' | 'chat' | 'generating' | 'generate-failed'>('room');
   const [retrying, setRetrying] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+  const [streamSections, setStreamSections] = useState<SOAPSections>(EMPTY_SECTIONS);
 
   // Handover state
   const [showHandover, setShowHandover] = useState(false);
@@ -71,7 +75,11 @@ export default function SessionPage() {
             setSOAPNote(noteRes.data.data);
             setView('note');
           } else {
-            setView('generating');
+            // Session ended but no note exists — usually means the doctor
+            // closed the tab mid-stream. Surface the retry button (which
+            // reopens the streaming endpoint) along with any persisted error.
+            setGenError(s.noteGenerationError || null);
+            setView('generate-failed');
           }
         }
       } finally {
@@ -113,7 +121,7 @@ export default function SessionPage() {
     };
   }, [soapNote?.id, sessionId]);
 
-  const handleSessionEnd = (sid: string) => {
+  const handleSessionEnd = async (sid: string) => {
     clearSession();
     setView('generating');
 
@@ -135,85 +143,63 @@ export default function SessionPage() {
       return;
     }
 
-    let attempts = 0;
-    const poll = setInterval(async () => {
-      attempts++;
-      try {
-        const sessionRes = await api.get(`/sessions/${sid}`);
-        const updated = sessionRes.data.data as ConsultationSession;
-        if (updated.soapNote?.id) {
-          const noteRes = await api.get(`/soap-notes/${updated.soapNote.id}`);
-          setSOAPNote(noteRes.data.data);
-          setSession(updated);
-          setGenError(null);
+    // Open the streaming endpoint — server emits Claude's text deltas, and
+    // we surface each in-flight section progressively so the doctor sees the
+    // note fill in instead of staring at a spinner. On 'done' we fetch the
+    // session to pick up auto-generated extractions/billing codes.
+    setStreamSections(EMPTY_SECTIONS);
+    setGenError(null);
+    try {
+      await streamSOAPNote(sid, {
+        onSections: (sections) => setStreamSections(sections),
+        onDone: async (note) => {
+          setSOAPNote(note as unknown as SOAPNote);
+          try {
+            const sessionRes = await api.get(`/sessions/${sid}`);
+            setSession(sessionRes.data.data as ConsultationSession);
+          } catch {}
           setView('note');
-          clearInterval(poll);
-          return;
-        }
-        // Server persists generation errors on the session — surface them
-        // immediately instead of waiting for the poll budget to expire.
-        if (updated.noteGenerationError) {
-          setGenError(updated.noteGenerationError);
+        },
+        onError: (message) => {
+          setGenError(message);
           setView('generate-failed');
-          clearInterval(poll);
-          return;
-        }
-      } catch {}
-      // 60 × 2s = 120s — Claude Sonnet routinely takes 30-60s, plus retries.
-      if (attempts > 60) {
-        clearInterval(poll);
-        setGenError('Generation is taking unusually long. The server may still be working — try refreshing in a minute, or retry below.');
-        setView('generate-failed');
-      }
-    }, 2000);
+        },
+      });
+    } catch (err) {
+      const e = err as { message?: string };
+      setGenError(e?.message || 'Failed to start note generation');
+      setView('generate-failed');
+    }
   };
 
   const handleRetryGenerate = async () => {
     setRetrying(true);
     setGenError(null);
+    setStreamSections(EMPTY_SECTIONS);
     setView('generating');
     try {
-      await api.post('/soap-notes/generate', { sessionId });
-    } catch (err) {
-      // The synchronous /soap-notes/generate endpoint surfaces validation
-      // failures (empty transcript, finalized note, Claude API failure) right
-      // here — don't poll for them, just show the message and stop.
-      const e = err as { response?: { data?: { message?: string } }; message?: string };
-      const msg = e?.response?.data?.message || e?.message || 'Failed to generate note';
-      setGenError(msg);
-      setView('generate-failed');
-      setRetrying(false);
-      return;
-    }
-    let attempts = 0;
-    const poll = setInterval(async () => {
-      attempts++;
-      try {
-        const sessionRes = await api.get(`/sessions/${sessionId}`);
-        const updated = sessionRes.data.data as ConsultationSession;
-        if (updated.soapNote?.id) {
-          const noteRes = await api.get(`/soap-notes/${updated.soapNote.id}`);
-          setSOAPNote(noteRes.data.data);
-          setSession(updated);
-          setGenError(null);
+      await streamSOAPNote(sessionId, {
+        onSections: (sections) => setStreamSections(sections),
+        onDone: async (note) => {
+          setSOAPNote(note as unknown as SOAPNote);
+          try {
+            const sessionRes = await api.get(`/sessions/${sessionId}`);
+            setSession(sessionRes.data.data as ConsultationSession);
+          } catch {}
           setView('note');
-          clearInterval(poll);
-          return;
-        }
-        if (updated.noteGenerationError) {
-          setGenError(updated.noteGenerationError);
+        },
+        onError: (message) => {
+          setGenError(message);
           setView('generate-failed');
-          clearInterval(poll);
-          return;
-        }
-      } catch {}
-      if (attempts > 60) {
-        clearInterval(poll);
-        setGenError('Generation is taking unusually long. The server may still be working — try refreshing in a minute, or retry below.');
-        setView('generate-failed');
-      }
-    }, 2000);
-    setRetrying(false);
+        },
+      });
+    } catch (err) {
+      const e = err as { message?: string };
+      setGenError(e?.message || 'Failed to generate note');
+      setView('generate-failed');
+    } finally {
+      setRetrying(false);
+    }
   };
 
   const handleFinalizeNote = async () => {
@@ -461,16 +447,40 @@ export default function SessionPage() {
           </div>
         )}
 
-        {/* Generating state */}
+        {/* Generating state — progressive section fill as Claude streams */}
         {view === 'generating' && (
-          <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
-            <div className="w-16 h-16 bg-primary-50 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Spinner size="lg" />
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 sm:p-8">
+            <div className="flex items-center gap-3 mb-5">
+              <Spinner size="sm" />
+              <div>
+                <h3 className="font-semibold text-gray-900 leading-tight">Generating Clinical Note</h3>
+                <p className="text-xs text-gray-500">Streaming from Claude — sections fill in as they’re written.</p>
+              </div>
             </div>
-            <h3 className="font-semibold text-gray-900 mb-2">Generating Clinical Note</h3>
-            <p className="text-sm text-gray-500">
-              Claude AI is analyzing the consultation transcript and generating your SOAP note. This usually takes 30–60 seconds; longer for detailed consultations.
-            </p>
+            <div className="space-y-4">
+              {([
+                { key: 'subjective', label: 'Subjective' },
+                { key: 'objective',  label: 'Objective'  },
+                { key: 'assessment', label: 'Assessment' },
+                { key: 'plan',       label: 'Plan'       },
+              ] as const).map(({ key, label }) => {
+                const text = streamSections[key];
+                const active = text.length > 0 && !Object.values(streamSections)
+                  .slice(['subjective','objective','assessment','plan'].indexOf(key) + 1)
+                  .some((v) => v.length > 0);
+                return (
+                  <div key={key}>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-1">
+                      {label}
+                    </p>
+                    <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap min-h-[1.25rem]">
+                      {text || <span className="text-gray-300">…</span>}
+                      {active && <span className="inline-block w-[2px] h-[1em] align-[-2px] ml-0.5 bg-primary-500 animate-pulse" />}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

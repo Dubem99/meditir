@@ -23,15 +23,14 @@ const SHARED_RULES = `Rules:
 3. **Never output "Not documented" or similar placeholder text.** If a section has limited data, write a brief clinically valid statement that reflects reality.
 4. When previous visit history is provided, reference it to show continuity of care where relevant.
 5. If the transcript is very short, still produce a coherent note using whatever clinical signal exists — never leave a section empty or placeholder.
-6. Respond ONLY with a valid JSON object — no markdown, no explanation.
+6. Output ONLY these four XML tags in this exact order — no preamble, no explanation, no markdown, no JSON:
 
-JSON format:
-{
-  "subjective": "...",
-  "objective": "...",
-  "assessment": "...",
-  "plan": "..."
-}`;
+<subjective>...</subjective>
+<objective>...</objective>
+<assessment>...</assessment>
+<plan>...</plan>
+
+The content of each tag is plain prose (or a numbered list for the plan when appropriate). Do not nest other XML tags inside them.`;
 
 export const NOTE_TEMPLATES: ReadonlyArray<NoteTemplate> = [
   {

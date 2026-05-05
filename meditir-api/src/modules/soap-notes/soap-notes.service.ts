@@ -20,6 +20,74 @@ const SOAPResponseSchema = z.object({
   plan: z.string().min(1),
 });
 
+// Parse Claude's XML output (<subjective>...</subjective>...) into the four
+// SOAP fields. Tolerant of leading/trailing whitespace and case variants.
+// Returns null if any section is missing or empty — callers decide whether
+// to fall back or error.
+const SOAP_TAGS = ['subjective', 'objective', 'assessment', 'plan'] as const;
+export const parseSOAPSections = (
+  text: string,
+): { subjective: string; objective: string; assessment: string; plan: string } | null => {
+  const out: Record<string, string> = {};
+  for (const tag of SOAP_TAGS) {
+    const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i');
+    const m = text.match(re);
+    if (!m) return null;
+    const value = m[1].trim();
+    if (!value) return null;
+    out[tag] = value;
+  }
+  return out as { subjective: string; objective: string; assessment: string; plan: string };
+};
+
+// Shared between the synchronous generator and the streaming generator. Keeping
+// the prompt construction in one place ensures both paths produce identical
+// output for the same session input.
+type SessionForPrompt = {
+  templateId: string | null;
+  additionalNotes: Array<{ text: string }>;
+  patient: {
+    firstName: string;
+    lastName: string;
+    allergies: string[];
+    chronicConditions: string[];
+  };
+};
+type PreviousNoteForPrompt = {
+  assessment: string;
+  plan: string;
+  session: { scheduledAt: Date };
+};
+const buildSOAPPrompt = (
+  session: SessionForPrompt,
+  previousNotes: PreviousNoteForPrompt[],
+  transcriptText: string,
+): { systemPrompt: string; userMessage: string } => {
+  const historySection = previousNotes.length > 0
+    ? `\nPrevious Visit History (last ${previousNotes.length} finalized visits):\n${previousNotes.map((n, i) => {
+        const visitDate = n.session.scheduledAt.toISOString().slice(0, 10);
+        return `Visit ${i + 1} (${visitDate}):\nAssessment: ${n.assessment}\nPlan: ${n.plan}`;
+      }).join('\n\n')}\n`
+    : '';
+
+  // Doctor-typed additional context attached to this session. Surfaced as a
+  // distinct section so the model doesn't confuse it with patient-spoken
+  // transcript content.
+  const additionalNotesSection = session.additionalNotes.length > 0
+    ? `\nDoctor's additional context (typed by the clinician, not from the consultation audio):\n${session.additionalNotes
+        .map((n, i) => `${i + 1}. ${n.text}`)
+        .join('\n')}\n`
+    : '';
+
+  const patientContext = `Patient: ${session.patient.firstName} ${session.patient.lastName}
+Known allergies: ${session.patient.allergies.join(', ') || 'None documented'}
+Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None documented'}${historySection}${additionalNotesSection}`;
+
+  const template = getTemplate(session.templateId);
+  const userMessage = `${patientContext}\n\nConsultation Transcript:\n${transcriptText}`;
+  return { systemPrompt: template.systemPrompt, userMessage };
+};
+
 const SYSTEM_PROMPT = `You are a clinical documentation assistant for Nigerian hospitals.
 Your task is to convert a doctor-patient consultation transcript into a structured SOAP note.
 
@@ -120,49 +188,25 @@ export const generateSOAPNote = async (sessionId: string, hospitalId: string) =>
     );
   }
 
-  const historySection = previousNotes.length > 0
-    ? `\nPrevious Visit History (last ${previousNotes.length} finalized visits):\n${previousNotes.map((n, i) => {
-        const visitDate = n.session.scheduledAt.toISOString().slice(0, 10);
-        return `Visit ${i + 1} (${visitDate}):\nAssessment: ${n.assessment}\nPlan: ${n.plan}`;
-      }).join('\n\n')}\n`
-    : '';
-
-  // Doctor-typed additional context attached to this session. Not part of the
-  // transcript — these are deliberate notes the doctor wants Claude to weigh
-  // when drafting the SOAP. We surface them as a distinct section so the model
-  // doesn't confuse them with patient-spoken content.
-  const additionalNotesSection = session.additionalNotes.length > 0
-    ? `\nDoctor's additional context (typed by the clinician, not from the consultation audio):\n${session.additionalNotes
-        .map((n, i) => `${i + 1}. ${n.text}`)
-        .join('\n')}\n`
-    : '';
-
-  const patientContext = `Patient: ${session.patient.firstName} ${session.patient.lastName}
-Known allergies: ${session.patient.allergies.join(', ') || 'None documented'}
-Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None documented'}${historySection}${additionalNotesSection}`;
-
-  // Pick the template prompt for this session (default = general practice).
-  const template = getTemplate(session.templateId);
+  const { systemPrompt, userMessage } = buildSOAPPrompt(session, previousNotes, transcriptText);
 
   let parsed: z.infer<typeof SOAPResponseSchema>;
   try {
     const response = await client.messages.create({
       model: config.CLAUDE_MODEL,
       max_tokens: 2048,
-      system: template.systemPrompt,
-      messages: [
-        {
-          role: 'user',
-          content: `${patientContext}\n\nConsultation Transcript:\n${transcriptText}`,
-        },
-      ],
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
     });
 
     const content = response.content[0];
     if (content.type !== 'text') throw new Error('Unexpected response type from Claude');
 
-    const rawJson = content.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-    parsed = SOAPResponseSchema.parse(JSON.parse(rawJson));
+    const sections = parseSOAPSections(content.text);
+    if (!sections) {
+      throw new Error('Claude response did not contain all four SOAP sections');
+    }
+    parsed = SOAPResponseSchema.parse(sections);
   } catch (err: unknown) {
     const e = err as { name?: string; message?: string; status?: number; error?: unknown; stack?: string };
     logger.error('SOAP generation failed', {
@@ -179,7 +223,18 @@ Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None docu
     );
   }
 
-  // Non-blocking drug interaction check
+  return persistSOAPNote(sessionId, hospitalId, session.patientId, parsed);
+};
+
+// Shared by the synchronous + streaming generators. Runs the drug-interaction
+// check, upserts the SOAPNote, writes the audit row, and triggers EHR
+// extraction. Returns the persisted note.
+const persistSOAPNote = async (
+  sessionId: string,
+  hospitalId: string,
+  patientId: string,
+  parsed: { subjective: string; objective: string; assessment: string; plan: string },
+) => {
   const drugWarnings = await checkDrugInteractions(parsed.plan).catch(() => [] as string[]);
 
   const note = await prisma.sOAPNote.upsert({
@@ -187,7 +242,7 @@ Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None docu
     create: {
       sessionId,
       hospitalId,
-      patientId: session.patientId,
+      patientId,
       ...parsed,
       status: NoteStatus.AI_GENERATED,
       aiModel: config.CLAUDE_MODEL,
@@ -216,13 +271,117 @@ Chronic conditions: ${session.patient.chronicConditions.join(', ') || 'None docu
     },
   });
 
-  // Awaited so extractions are persisted before the client fetches the session
   await extractFromSOAPNote(note.id).catch((err) =>
     logger.error('EHR extraction failed (non-fatal)', { error: err, soapNoteId: note.id })
   );
 
   return note;
 };
+
+// Streaming SOAP generation. Yields events as Claude produces output:
+//   - { type: 'delta',  text }     — every text chunk from Anthropic
+//   - { type: 'done',   note }     — final persisted SOAPNote (drug check,
+//                                    upsert, audit, EHR extraction all done)
+//   - never yields 'error' — errors are thrown so the controller can decide
+//     how to surface them (HTTP status for pre-stream, ndjson event mid-stream)
+//
+// The session validation, prior-note lookup, and prompt construction match
+// generateSOAPNote exactly — same input, same output, just incremental.
+export type SOAPStreamEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'done'; note: Awaited<ReturnType<typeof persistSOAPNote>> };
+
+export async function* streamSOAPNote(
+  sessionId: string,
+  hospitalId: string,
+): AsyncGenerator<SOAPStreamEvent> {
+  const session = await prisma.consultationSession.findFirst({
+    where: { id: sessionId, hospitalId },
+    include: {
+      transcriptions: { orderBy: { startMs: 'asc' } },
+      additionalNotes: { orderBy: { createdAt: 'asc' }, select: { text: true } },
+      patient: { select: { id: true, firstName: true, lastName: true, allergies: true, chronicConditions: true } },
+    },
+  });
+  if (!session) throw new AppError('Session not found', 404);
+
+  const existing = await prisma.sOAPNote.findUnique({ where: { sessionId } });
+  if (existing?.status === NoteStatus.FINALIZED) {
+    throw new AppError('This SOAP note has been finalized and cannot be regenerated', 400);
+  }
+
+  // Clear any prior generation error before starting.
+  await prisma.consultationSession.update({
+    where: { id: sessionId },
+    data: { noteGenerationError: null },
+  });
+
+  const previousNotes = await prisma.sOAPNote.findMany({
+    where: {
+      patientId: session.patientId,
+      hospitalId,
+      status: NoteStatus.FINALIZED,
+      sessionId: { not: sessionId },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 2,
+    include: { session: { select: { scheduledAt: true } } },
+  });
+
+  const transcriptText = session.transcriptions.length > 0
+    ? buildTranscriptText(session.transcriptions)
+    : '';
+
+  const meaningfulText = transcriptText.replace(/\s+/g, ' ').trim();
+  const notesText = session.additionalNotes.map((n) => n.text).join(' ').replace(/\s+/g, ' ').trim();
+  if (meaningfulText.length + notesText.length < 20) {
+    throw new AppError(
+      'This session has no recorded transcript to generate a note from. Record a consultation or add notes manually first.',
+      400,
+    );
+  }
+
+  const { systemPrompt, userMessage } = buildSOAPPrompt(session, previousNotes, transcriptText);
+
+  let fullText = '';
+  try {
+    const stream = client.messages.stream({
+      model: config.CLAUDE_MODEL,
+      max_tokens: 2048,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+    });
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        const chunk = event.delta.text;
+        fullText += chunk;
+        yield { type: 'delta', text: chunk };
+      }
+    }
+  } catch (err: unknown) {
+    const e = err as { name?: string; message?: string; status?: number };
+    logger.error('SOAP stream failed', {
+      sessionId,
+      errorName: e?.name ?? 'Unknown',
+      errorMessage: e?.message ?? String(err),
+      errorStatus: e?.status,
+    });
+    throw new AppError(`Failed to generate SOAP note: ${e?.message || 'unknown error'}`, 503);
+  }
+
+  const sections = parseSOAPSections(fullText);
+  if (!sections) {
+    throw new AppError(
+      'Claude response did not contain all four SOAP sections — try regenerating.',
+      503,
+    );
+  }
+  const parsed = SOAPResponseSchema.parse(sections);
+
+  const note = await persistSOAPNote(sessionId, hospitalId, session.patient.id, parsed);
+  yield { type: 'done', note };
+}
 
 export const getSOAPNote = async (id: string, hospitalId: string) => {
   const note = await prisma.sOAPNote.findFirst({

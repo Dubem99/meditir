@@ -2,9 +2,7 @@ import { Request, Response } from 'express';
 import * as service from './sessions.service';
 import { param, hospitalId } from '../../utils/params';
 import { AppError } from '../../utils/AppError';
-import * as soapService from '../soap-notes/soap-notes.service';
 import { getPublicCatalog } from '../../data/note-templates';
-import { prisma } from '../../config/database';
 
 export const create = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new AppError('Authentication required', 401);
@@ -45,17 +43,12 @@ export const end = async (req: Request, res: Response): Promise<void> => {
   const sid = param(req, 'id');
   const session = await service.endSession(sid, hid, req.user.id);
 
-  // Fire-and-forget. On failure, persist the error on the session so the
-  // doctor's UI can surface *why* generation didn't succeed instead of a
-  // generic poll timeout.
-  soapService.generateSOAPNote(sid, hid).catch(async (err) => {
-    const message = (err as { message?: string })?.message ?? 'Note generation failed';
-    await prisma.consultationSession
-      .update({ where: { id: sid }, data: { noteGenerationError: message.slice(0, 500) } })
-      .catch(() => {});
-  });
-
-  res.json({ status: 'success', data: session, message: 'SOAP note generation started' });
+  // Generation is now owned by the client's POST /soap-notes/stream/:sessionId
+  // call so the doctor sees Claude's output progressively. The client opens
+  // the stream immediately after this response. If the doctor closes the
+  // browser before the stream completes, the retry button on the session page
+  // re-triggers generation on next visit.
+  res.json({ status: 'success', data: session });
 };
 
 export const cancel = async (req: Request, res: Response): Promise<void> => {
