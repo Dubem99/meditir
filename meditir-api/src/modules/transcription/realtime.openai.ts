@@ -101,6 +101,10 @@ export class OpenAIRealtimeConnection {
   // Buffer audio that arrives before the upstream socket is ready, then
   // flush once it opens.
   private pendingAudioFrames: string[] = [];
+  // Resolver for an in-flight flush() call. Resolved when the next
+  // `.completed` or `input_audio_buffer.committed` event arrives, or when
+  // the flush timeout fires.
+  private flushResolve: (() => void) | null = null;
 
   constructor(dialect: DialectInput, cb: RealtimeCallbacks) {
     this.dialect = dialect;
@@ -216,6 +220,54 @@ export class OpenAIRealtimeConnection {
     this.ws = null;
   }
 
+  /**
+   * Force OpenAI to commit whatever audio is currently buffered as a complete
+   * utterance, instead of waiting for server-VAD silence detection.
+   *
+   * Without this, when the doctor pauses or ends recording mid-sentence, the
+   * server-VAD threshold (silence_duration_ms = 600) never fires, the partial
+   * utterance never produces a `.completed` event, and the transcript text
+   * the doctor saw streaming as `onPartial` is silently dropped — never
+   * persisted to the DB, so SOAP generation rejects the session as empty.
+   *
+   * Resolves when either the resulting `.completed` event arrives (so the
+   * onFinal callback has run + persisted), the buffer-was-empty error arrives
+   * (no audio to commit, common case for instant-stop), or the timeout fires.
+   * Safe to call multiple times — only one flush is in flight at any moment.
+   */
+  flush(timeoutMs = 3000): Promise<void> {
+    if (!this.opened || this.closed || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+    // If there's already a pending flush, just wait on it — concurrent
+    // flushes would race their resolvers.
+    if (this.flushResolve) {
+      return new Promise((resolve) => {
+        const prior = this.flushResolve!;
+        this.flushResolve = () => { prior(); resolve(); };
+      });
+    }
+    return new Promise<void>((resolve) => {
+      this.flushResolve = resolve;
+      const timer = setTimeout(() => {
+        if (this.flushResolve === resolve) {
+          this.flushResolve = null;
+          resolve();
+        }
+      }, timeoutMs);
+      // Best-effort cleanup if resolved before timeout fires.
+      const wrapped = resolve;
+      this.flushResolve = () => { clearTimeout(timer); wrapped(); };
+      this.send({ type: 'input_audio_buffer.commit' });
+    });
+  }
+
+  /** Commit any buffered audio, wait for the resulting final, then close. */
+  async closeAfterFlush(timeoutMs = 3000): Promise<void> {
+    try { await this.flush(timeoutMs); } catch {}
+    this.close();
+  }
+
   private send(payload: Record<string, unknown>): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     try {
@@ -261,24 +313,55 @@ export class OpenAIRealtimeConnection {
         this.currentItemId = null;
         this.finalStartedAt = 0;
         if (text) this.cb.onFinal(text, durationMs);
+        // A pending flush() is satisfied — the partial-utterance commit it
+        // requested has now produced its final transcript and been persisted
+        // by onFinal. Safe for the caller to close the WS.
+        this.resolveFlush();
+        break;
+      }
+
+      // Acknowledgement of an explicit `input_audio_buffer.commit`. Arrives
+      // before `.completed` (or instead of it, for a buffer that contained
+      // no speech). Either way, flush() can resolve as soon as we hear this
+      // acknowledgement — the audio is no longer pending in OpenAI.
+      case 'input_audio_buffer.committed': {
+        this.resolveFlush();
         break;
       }
 
       case 'conversation.item.input_audio_transcription.failed': {
         const error = (msg.error as { message?: string } | undefined)?.message ?? 'transcription failed';
         this.cb.onError(error);
+        this.resolveFlush();
         break;
       }
 
       case 'error': {
-        const err = (msg.error as { message?: string } | undefined)?.message ?? 'OpenAI realtime error';
-        this.cb.onError(err);
+        const err = msg.error as { message?: string; code?: string } | undefined;
+        // `input_audio_buffer_commit_empty` is the expected response when we
+        // explicitly commit a buffer that had no audio (e.g. doctor hit stop
+        // immediately after start with no speech). Don't surface it to the
+        // doctor — just unblock any pending flush.
+        if (err?.code === 'input_audio_buffer_commit_empty') {
+          this.resolveFlush();
+          break;
+        }
+        this.cb.onError(err?.message ?? 'OpenAI realtime error');
+        this.resolveFlush();
         break;
       }
 
       default:
         // Other event types (session.created, session.updated, etc.) — ignore
         break;
+    }
+  }
+
+  private resolveFlush(): void {
+    if (this.flushResolve) {
+      const r = this.flushResolve;
+      this.flushResolve = null;
+      r();
     }
   }
 }

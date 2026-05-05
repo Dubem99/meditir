@@ -153,10 +153,21 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
 
   let rt: RealtimeContext | null = null;
 
-  const teardown = () => {
+  // Tear down the upstream OpenAI WS, but FIRST commit whatever audio is
+  // buffered there so the partial utterance the doctor was speaking gets
+  // turned into a `.completed` event and persisted as a Transcription row.
+  // Server-VAD only auto-commits after 600ms of silence, so without this
+  // explicit commit the last few seconds of speech are lost on stop/pause.
+  const teardown = async () => {
     if (rt) {
-      rt.conn.close();
+      const conn = rt.conn;
       rt = null;
+      try {
+        await conn.closeAfterFlush(3000);
+      } catch (err) {
+        logger.warn('[STT] teardown flush failed', { err: (err as Error).message });
+        try { conn.close(); } catch {}
+      }
     }
   };
 
@@ -200,7 +211,7 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
 
       // Replace any previous realtime context on this socket — start always
       // wins, in case the browser starts a fresh recording without stop.
-      teardown();
+      await teardown();
 
       const dialect: DialectInput = payload.dialect ?? Dialect.NIGERIAN_ENGLISH;
       // Persisted dialect is always a Prisma enum value. AUTO_DETECT collapses
@@ -293,10 +304,13 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
     rt.conn.appendAudio(buf.toString('base64'));
   });
 
-  socket.on('transcribe:pause', () => {
+  socket.on('transcribe:pause', async () => {
     if (!rt) return;
     rt.paused = true;
     logger.info('[STT] transcribe:pause', { sessionId: rt.sessionId });
+    // Commit any in-flight utterance so a mid-sentence pause doesn't drop
+    // the partial. The WS stays open — resume will keep streaming.
+    try { await rt.conn.flush(3000); } catch {}
     socket.emit('transcribe:paused');
   });
 
@@ -307,12 +321,12 @@ export const registerTranscriptionHandlers = (io: Server, socket: Socket): void 
     socket.emit('transcribe:resumed');
   });
 
-  socket.on('transcribe:stop', () => {
-    teardown();
+  socket.on('transcribe:stop', async () => {
+    await teardown();
   });
 
-  socket.on('disconnect', () => {
-    teardown();
+  socket.on('disconnect', async () => {
+    await teardown();
     logger.debug('Socket disconnected', { socketId: socket.id });
   });
 };
