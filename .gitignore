@@ -6,3 +6,5 @@ dist/
 .next/
 prisma/migrations/
 audit-reports/
+
+.vercel
