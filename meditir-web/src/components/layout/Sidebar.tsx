@@ -195,12 +195,27 @@ export const Sidebar = () => {
           <NavLinks />
         </nav>
         <div className="px-3 py-4 border-t border-gray-100 space-y-1">
-          <div className="flex items-center gap-3 px-3 py-2">
+          <Link
+            href="/profile"
+            className={clsx(
+              'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
+              isActive('/profile') ? 'bg-primary-50' : 'hover:bg-gray-50',
+            )}
+            title="View profile"
+          >
             <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-semibold text-xs shrink-0">
               {initials}
             </div>
-            <p className="text-xs text-gray-600 truncate flex-1">{user.email}</p>
-          </div>
+            <div className="flex-1 min-w-0">
+              <p className={clsx(
+                'text-xs truncate',
+                isActive('/profile') ? 'text-primary-700 font-medium' : 'text-gray-600',
+              )}>
+                {user.email}
+              </p>
+              <p className="text-[10px] text-gray-400">Profile & settings</p>
+            </div>
+          </Link>
           <button
             onClick={handleLogout}
             className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition-colors"
@@ -252,12 +267,27 @@ export const Sidebar = () => {
               <NavLinks onClick={() => setMobileOpen(false)} />
             </nav>
             <div className="px-3 py-4 border-t border-gray-100 space-y-1">
-              <div className="flex items-center gap-3 px-3 py-2">
+              <Link
+                href="/profile"
+                onClick={() => setMobileOpen(false)}
+                className={clsx(
+                  'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
+                  isActive('/profile') ? 'bg-primary-50' : 'hover:bg-gray-50',
+                )}
+              >
                 <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-semibold text-sm shrink-0">
                   {initials}
                 </div>
-                <p className="text-xs text-gray-600 truncate flex-1">{user.email}</p>
-              </div>
+                <div className="flex-1 min-w-0">
+                  <p className={clsx(
+                    'text-xs truncate',
+                    isActive('/profile') ? 'text-primary-700 font-medium' : 'text-gray-600',
+                  )}>
+                    {user.email}
+                  </p>
+                  <p className="text-[10px] text-gray-400">Profile & settings</p>
+                </div>
+              </Link>
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition-colors"

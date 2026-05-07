@@ -28,6 +28,7 @@ import ttsRoutes from './modules/tts/tts.routes';
 import adminRoutes from './modules/admin/admin.routes';
 import auditRoutes from './modules/audit/audit.routes';
 import additionalNotesRoutes from './modules/additional-notes/additional-notes.routes';
+import meRoutes from './modules/me/me.routes';
 
 export const createApp = () => {
   const app = express();
@@ -91,6 +92,7 @@ export const createApp = () => {
         'admin',
         'audit',
         'additional-notes',
+        'me',
       ],
       commit: process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown',
     });
@@ -123,6 +125,7 @@ export const createApp = () => {
   app.use(`${base}/admin`, adminRoutes);
   app.use(`${base}/audit`, auditRoutes);
   app.use(`${base}/additional-notes`, additionalNotesRoutes);
+  app.use(`${base}/me`, meRoutes);
 
   // 404 handler
   app.use((req, res) => {
