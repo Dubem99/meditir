@@ -56,3 +56,24 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
   res.clearCookie('refreshToken');
   res.json({ status: 'success', message: 'Logged out successfully' });
 };
+
+// Always 200, regardless of whether the email exists. The response body and
+// timing must not leak account existence.
+export const forgotPassword = async (req: Request, res: Response): Promise<void> => {
+  const email = (req.body?.email ?? '').toString();
+  await authService.requestPasswordReset(email);
+  res.json({
+    status: 'success',
+    message: 'If an account with that email exists, a password reset link has been sent.',
+  });
+};
+
+export const resetPassword = async (req: Request, res: Response): Promise<void> => {
+  const token = (req.body?.token ?? '').toString();
+  const newPassword = (req.body?.newPassword ?? '').toString();
+  await authService.resetPassword(token, newPassword);
+  res.json({
+    status: 'success',
+    message: 'Password updated. Sign in with your new password.',
+  });
+};

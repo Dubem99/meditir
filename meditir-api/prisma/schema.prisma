@@ -182,7 +182,8 @@ model User {
   hospitalId String?
   hospital   Hospital? @relation(fields: [hospitalId], references: [id])
 
-  refreshTokens RefreshToken[]
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
   doctor        Doctor?
   patient       Patient?
   adminProfile  AdminProfile?
@@ -203,6 +204,24 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+// One-time password reset codes. The plaintext token is sent to the user's
+// email; only the SHA-256 hash is stored here so a DB read can't be used to
+// hijack an active reset. usedAt is set the first time the token is consumed,
+// preventing replay. expiresAt limits the window (60 min default).
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 // ─────────────────────────────────────────────

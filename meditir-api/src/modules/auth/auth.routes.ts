@@ -12,5 +12,9 @@ router.post('/register', authLimiter, validate(RegisterHospitalSchema), asyncHan
 router.post('/login', authLimiter, validate(LoginSchema), asyncHandler(controller.login));
 router.post('/refresh', asyncHandler(controller.refresh));
 router.post('/logout', authenticate, asyncHandler(controller.logout));
+// Both rate-limited via authLimiter — forgot-password is a low-effort enum
+// vector, reset-password is a brute-force vector against active token hashes.
+router.post('/forgot-password', authLimiter, asyncHandler(controller.forgotPassword));
+router.post('/reset-password', authLimiter, asyncHandler(controller.resetPassword));
 
 export default router;

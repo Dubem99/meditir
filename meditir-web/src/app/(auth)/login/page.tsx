@@ -72,9 +72,17 @@ export default function LoginPage() {
 
         {/* Password */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-[#6b9a98] tracking-wide uppercase">
-            Password
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-[#6b9a98] tracking-wide uppercase">
+              Password
+            </label>
+            <Link
+              href="/forgot-password"
+              className="text-xs text-[#5a7a78] hover:text-[#7dccc4] transition-colors normal-case"
+            >
+              Forgot password?
+            </Link>
+          </div>
           <div className="relative">
             <input
               type={showPassword ? 'text' : 'password'}

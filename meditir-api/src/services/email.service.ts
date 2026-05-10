@@ -798,3 +798,76 @@ export const sendSoapNoteToRecords = async ({
   }
   console.log(`[email] Records transfer email sent to ${recordsEmail}, id=${sendData?.id}`);
 };
+
+// Password-reset email. Plaintext token in the URL is single-use, expires in
+// 60 min, and is invalidated on first successful reset. Body kept short — no
+// branding bake-off, just the action and the safety footer.
+export const sendPasswordResetEmail = async ({
+  to,
+  firstName,
+  resetUrl,
+  expiresInMinutes,
+}: {
+  to: string;
+  firstName: string | null;
+  resetUrl: string;
+  expiresInMinutes: number;
+}) => {
+  const resend = getResend();
+  if (!resend) {
+    console.warn('[email] RESEND_API_KEY not set — skipping password reset email');
+    return;
+  }
+
+  const greeting = firstName ? `Hi ${firstName},` : 'Hi,';
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reset your Meditir password</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Inter,system-ui,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.06);">
+          <tr>
+            <td style="background:#030c0b;padding:32px 40px;">
+              <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;">Meditir</span>
+              <p style="color:#4db0a8;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin:20px 0 6px;">Password reset</p>
+              <h1 style="color:#ffffff;font-size:24px;font-weight:700;margin:0;line-height:1.25;">Reset your password</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 40px;color:#1f2937;font-size:15px;line-height:1.6;">
+              <p style="margin:0 0 12px;">${greeting}</p>
+              <p style="margin:0 0 16px;">We received a request to reset the password on your Meditir account. Click the button below to choose a new one. The link expires in ${expiresInMinutes} minutes and can be used once.</p>
+              <p style="margin:24px 0;">
+                <a href="${resetUrl}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:10px;">Reset password</a>
+              </p>
+              <p style="margin:0 0 8px;color:#6b7280;font-size:13px;">If the button doesn't work, paste this link into your browser:</p>
+              <p style="margin:0 0 16px;color:#374151;font-size:12px;word-break:break-all;">${resetUrl}</p>
+              <p style="margin:24px 0 0;color:#6b7280;font-size:12px;">If you didn't request this, you can safely ignore the email — your password won't change.</p>
+            </td>
+          </tr>
+        </table>
+        <p style="color:#9ca3af;font-size:11px;margin-top:16px;">Sent by Meditir</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const { data: sendData, error: sendError } = await resend.emails.send({
+    from: FROM,
+    to,
+    subject: 'Reset your Meditir password',
+    html,
+  });
+  if (sendError) {
+    console.error('[email] Resend rejected password reset email:', JSON.stringify(sendError));
+    throw new Error(`Resend error: ${sendError.name || 'unknown'} — ${sendError.message || JSON.stringify(sendError)}`);
+  }
+  console.log(`[email] Password reset email sent to ${to}, id=${sendData?.id}`);
+};
