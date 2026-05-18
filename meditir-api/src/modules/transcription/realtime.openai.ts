@@ -118,10 +118,12 @@ export class OpenAIRealtimeConnection {
       return;
     }
 
+    // GA Realtime API: the `OpenAI-Beta: realtime=v1` header is gone. Sending
+    // it now forces the retired beta protocol and OpenAI rejects the session
+    // with "The Realtime Beta API is no longer supported."
     const ws = new WebSocket(OPENAI_REALTIME_URL, {
       headers: {
         Authorization: `Bearer ${config.OPENAI_API_KEY}`,
-        'OpenAI-Beta': 'realtime=v1',
       },
     });
     this.ws = ws;
@@ -149,20 +151,28 @@ export class OpenAIRealtimeConnection {
         const code = dialectToLanguage[this.dialect as Dialect];
         if (code) transcription.language = code;
       }
+      // GA shape: a single `session.update` with `session.type:"transcription"`.
+      // Audio settings move under `session.audio.input.*`, and the format is
+      // now an object (`audio/pcm` @ 24 kHz) instead of the string 'pcm16'.
       this.send({
-        type: 'transcription_session.update',
+        type: 'session.update',
         session: {
-          input_audio_format: 'pcm16',
-          input_audio_transcription: transcription,
-          // Server VAD chunks utterances based on silence — gives us natural
-          // sentence-level finals while still streaming partial deltas.
-          turn_detection: {
-            type: 'server_vad',
-            threshold: 0.5,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 600,
+          type: 'transcription',
+          audio: {
+            input: {
+              format: { type: 'audio/pcm', rate: 24000 },
+              transcription,
+              // Server VAD chunks utterances based on silence — gives us
+              // natural sentence-level finals while still streaming partials.
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.5,
+                prefix_padding_ms: 300,
+                silence_duration_ms: 600,
+              },
+              noise_reduction: { type: 'near_field' },
+            },
           },
-          input_audio_noise_reduction: { type: 'near_field' },
         },
       });
 
