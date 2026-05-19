@@ -49,7 +49,11 @@ try {
 
   console.log('[db-baseline] Running prisma migrate deploy...');
   prismaCli('migrate deploy');
-  console.log('[db-baseline] migrate deploy complete.');
+  console.log('[db-baseline] migrate deploy complete. Handing off to server.');
+  // Explicit: the Prisma engine can keep the event loop alive after
+  // $disconnect, so the process would otherwise hang here and the start
+  // chain (`&& node dist/server.js`) would never run.
+  process.exit(0);
 } catch (err) {
   console.error('[db-baseline] FAILED:', err?.message ?? err);
   await prisma.$disconnect().catch(() => {});
