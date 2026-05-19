@@ -18,4 +18,4 @@ COPY --from=builder /app/scripts ./scripts
 EXPOSE 4000
 # Adopt-baseline (idempotent) -> apply migrations -> start. Fails fast on
 # migration error instead of silently serving a stale/mismatched schema.
-CMD ["sh", "-c", "node scripts/db-baseline.mjs && npx prisma migrate deploy && node dist/server.js"]
+CMD ["sh", "-c", "node scripts/db-baseline.mjs && node dist/server.js"]

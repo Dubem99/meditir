@@ -21,25 +21,37 @@ const regclass = async (name) => {
   return r?.[0]?.t != null;
 };
 
+// Use the locally-installed prisma CLI and never let npx attempt a network
+// install (which hangs silently in a locked-down container until the
+// healthcheck times out). Fail fast instead.
+const prismaCli = (args) =>
+  execSync(`npx --no-install prisma ${args}`, { stdio: 'inherit' });
+
 try {
   const hasMigrationsTable = await regclass('_prisma_migrations');
   if (hasMigrationsTable) {
-    console.log('[db-baseline] _prisma_migrations present — nothing to do.');
+    console.log('[db-baseline] _prisma_migrations present — nothing to adopt.');
   } else {
     const hasSchema = await regclass('hospitals'); // stable core table
     if (hasSchema) {
       console.log(
         `[db-baseline] Existing schema with no migration history — adopting baseline ${BASELINE}.`,
       );
-      execSync(`npx prisma migrate resolve --applied ${BASELINE}`, { stdio: 'inherit' });
+      prismaCli(`migrate resolve --applied ${BASELINE}`);
       console.log('[db-baseline] Baseline adopted.');
     } else {
       console.log('[db-baseline] Fresh database — migrate deploy will create the schema.');
     }
   }
+
+  // Disconnect before the migrate engine runs so no session lingers.
+  await prisma.$disconnect();
+
+  console.log('[db-baseline] Running prisma migrate deploy...');
+  prismaCli('migrate deploy');
+  console.log('[db-baseline] migrate deploy complete.');
 } catch (err) {
   console.error('[db-baseline] FAILED:', err?.message ?? err);
+  await prisma.$disconnect().catch(() => {});
   process.exit(1);
-} finally {
-  await prisma.$disconnect();
 }
