@@ -20,3 +20,7 @@ process.env.COOKIE_SECRET ??= 'test_cookie_secret_min_16';
 process.env.ANTHROPIC_API_KEY ??= 'sk-ant-test-key';
 process.env.ALLOWED_ORIGINS ??= 'http://localhost:3000';
 process.env.LOG_LEVEL ??= 'error';
+// 64 hex chars = 32-byte AES-256 key; deterministic so tests can assert
+// round-trips with encryption enabled.
+process.env.PHI_ENCRYPTION_KEY ??=
+  '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';

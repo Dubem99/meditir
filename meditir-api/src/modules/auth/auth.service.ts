@@ -11,6 +11,7 @@ import { AppError } from '../../utils/AppError';
 import { Role } from '../../types/enums';
 import type { RegisterHospitalInput, LoginInput } from './auth.schema';
 import { sendOnboardingEmail, sendPasswordResetEmail } from '../../services/email.service';
+import { logger } from '../../utils/logger';
 
 // 60 minutes — long enough for users who hit the link from a different
 // device, short enough that an unused link can't sit forever in an inbox.
@@ -70,7 +71,12 @@ export const requestPasswordReset = async (email: string) => {
       }),
     )
     .catch((err) =>
-      console.error('[auth] sendPasswordResetEmail failed', { userId: user.id, err: (err as Error).message }),
+      logger.error('[email] password-reset email failed', {
+        event: 'email_send_failed',
+        kind: 'password_reset',
+        userId: user.id,
+        err: (err as Error).message,
+      }),
     );
 };
 
@@ -166,7 +172,13 @@ export const registerHospital = async (data: RegisterHospitalInput) => {
     adminFirstName: data.adminFirstName,
     hospitalName: data.hospitalName,
     hospitalSlug: data.hospitalSlug,
-  }).catch((err) => console.error('[email] Failed to send onboarding email:', err));
+  }).catch((err) =>
+    logger.error('[email] onboarding email failed', {
+      event: 'email_send_failed',
+      kind: 'onboarding',
+      err: (err as Error).message,
+    }),
+  );
 
   return result;
 };

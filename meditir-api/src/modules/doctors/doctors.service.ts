@@ -4,6 +4,7 @@ import { AppError } from '../../utils/AppError';
 import { Role } from '../../types/enums';
 import { getPaginationParams, paginate } from '../../utils/pagination';
 import { sendDoctorOnboardingEmail } from '../../services/email.service';
+import { logger } from '../../utils/logger';
 import {
   parseCsvBuffer,
   cleanRow,
@@ -66,7 +67,13 @@ export const onboardDoctor = async (hospitalId: string, data: OnboardDoctorInput
     specialization: data.specialization,
     hospitalName: hospital?.name ?? 'your hospital',
     temporaryPassword: data.password,
-  }).catch((err) => console.error('[email] Failed to send doctor onboarding email:', err));
+  }).catch((err) =>
+    logger.error('[email] doctor onboarding email failed', {
+      event: 'email_send_failed',
+      kind: 'doctor_onboarding',
+      err: (err as Error).message,
+    }),
+  );
 
   return doctor;
 };

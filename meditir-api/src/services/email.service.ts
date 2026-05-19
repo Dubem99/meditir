@@ -1,6 +1,16 @@
 import { Resend } from 'resend';
+import { logger } from '../utils/logger';
 
 const FROM = 'Meditir <onboarding@meditir.com>';
+
+// A missing API key silently drops transactional mail (onboarding,
+// password reset). Log it at error level with a stable event tag so it
+// is alertable instead of a buried console.warn.
+const logEmailDisabled = (kind: string) =>
+  logger.error('[email] send skipped — RESEND_API_KEY not set', {
+    event: 'email_skipped_no_api_key',
+    kind,
+  });
 
 let resendClient: Resend | null = null;
 const getResend = (): Resend | null => {
@@ -23,7 +33,7 @@ export const sendOnboardingEmail = async ({
   console.log(`[email] sendOnboardingEmail called for ${adminEmail} (${hospitalName})`);
   const resend = getResend();
   if (!resend) {
-    console.warn('[email] RESEND_API_KEY not set — skipping onboarding email');
+    logEmailDisabled('onboarding');
     return;
   }
 
@@ -273,7 +283,7 @@ export const sendDoctorOnboardingEmail = async ({
   console.log(`[email] sendDoctorOnboardingEmail called for ${doctorEmail} (${hospitalName})`);
   const resend = getResend();
   if (!resend) {
-    console.warn('[email] RESEND_API_KEY not set — skipping doctor onboarding email');
+    logEmailDisabled('doctor_onboarding');
     return;
   }
 
@@ -535,7 +545,7 @@ export const sendPatientSummaryEmail = async ({
 }) => {
   const resend = getResend();
   if (!resend) {
-    console.warn('[email] RESEND_API_KEY not set — skipping patient summary email');
+    logEmailDisabled('patient_summary');
     return;
   }
 
@@ -672,7 +682,7 @@ export const sendSoapNoteToRecords = async ({
 }) => {
   const resend = getResend();
   if (!resend) {
-    console.warn('[email] RESEND_API_KEY not set — skipping records transfer email');
+    logEmailDisabled('records_transfer');
     return;
   }
 
@@ -815,7 +825,7 @@ export const sendPasswordResetEmail = async ({
 }) => {
   const resend = getResend();
   if (!resend) {
-    console.warn('[email] RESEND_API_KEY not set — skipping password reset email');
+    logEmailDisabled('password_reset');
     return;
   }
 
