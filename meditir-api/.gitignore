@@ -2,7 +2,6 @@ node_modules/
 dist/
 .env
 *.log
-prisma/migrations/
 
 # Railway CLI local auth/config — contains live access + refresh tokens.
 # Never commit. If exposed, rotate via `railway logout && railway login`.
