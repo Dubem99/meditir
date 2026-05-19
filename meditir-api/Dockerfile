@@ -14,5 +14,8 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts ./scripts
 EXPOSE 4000
-CMD ["sh", "-c", "echo '[startup] running prisma db push'; npx prisma db push --accept-data-loss || echo '[startup] WARN: db push failed, continuing with stale schema'; echo '[startup] starting server'; node dist/server.js"]
+# Adopt-baseline (idempotent) -> apply migrations -> start. Fails fast on
+# migration error instead of silently serving a stale/mismatched schema.
+CMD ["sh", "-c", "node scripts/db-baseline.mjs && npx prisma migrate deploy && node dist/server.js"]
