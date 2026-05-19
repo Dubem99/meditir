@@ -15,8 +15,9 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const BASELINE = '0_init';
 
+// Cast regclass -> text; Prisma cannot deserialize the raw `regclass` type.
 const regclass = async (name) => {
-  const r = await prisma.$queryRawUnsafe(`SELECT to_regclass('public.${name}') AS t`);
+  const r = await prisma.$queryRawUnsafe(`SELECT to_regclass('public.${name}')::text AS t`);
   return r?.[0]?.t != null;
 };
 
